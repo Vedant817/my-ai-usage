@@ -140,7 +140,7 @@ export function parseCodex(
       skipped++;
     }
   }
-  pruneFileRecords(state, liveKeys);
+  pruneFileRecords(state, liveKeys, "codex:");
 
   return {
     records,

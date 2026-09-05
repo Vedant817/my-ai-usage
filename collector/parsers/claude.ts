@@ -109,7 +109,7 @@ export function parseClaude(
       if (fd != null) try { fs.closeSync(fd); } catch { /* ignore */ }
     }
   }
-  pruneFileRecords(state, liveKeys);
+  pruneFileRecords(state, liveKeys, "claude:");
 
   return {
     records,

@@ -98,7 +98,7 @@ export function parseGrok(
       skipped++;
     }
   }
-  pruneFileRecords(state, liveKeys);
+  pruneFileRecords(state, liveKeys, "grok:");
 
   return {
     records,

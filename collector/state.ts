@@ -99,11 +99,12 @@ export function mergeFileRecords(
   return all;
 }
 
-/** Drop cache entries for files that no longer exist (bounded growth). */
-export function pruneFileRecords(state: DashState, liveKeys: Set<string>): void {
+/** Drop cache entries for files that no longer exist (bounded growth).
+ *  Only touches keys with the given prefix so parsers can't wipe each other. */
+export function pruneFileRecords(state: DashState, liveKeys: Set<string>, prefix: string): void {
   if (!state.fileRecords) return;
   for (const k of Object.keys(state.fileRecords)) {
-    if (!liveKeys.has(k)) delete state.fileRecords[k];
+    if (k.startsWith(prefix) && !liveKeys.has(k)) delete state.fileRecords[k];
   }
 }
 
