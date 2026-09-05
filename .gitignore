@@ -1,0 +1,10 @@
+node_modules/
+.next/
+dist/
+data/
+*.db
+*.db-journal
+.env
+!.env.example
+.usage-dash/
+__pycache__/

@@ -1,0 +1,11 @@
+{
+  "name": "usage-dash-collector",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "collect": "bun run index.ts",
+    "dry": "bun run index.ts -- --days 30 --dry-run",
+    "typecheck": "tsc --noEmit"
+  }
+}
