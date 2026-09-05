@@ -13,6 +13,14 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async rewrites() {
+    // Keep the collector contract (POST /v1/ingest, GET /v1/summary, ...) working
+    // on the apex domain: API_URL=https://<app>.vercel.app with no path suffix.
+    return [
+      { source: "/v1/:path*", destination: "/api/v1/:path*" },
+      { source: "/health", destination: "/api/health" },
+    ];
+  },
 };
 
 export default nextConfig;

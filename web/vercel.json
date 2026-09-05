@@ -1,9 +1,14 @@
 {
-  "buildCommand": "npm run build",
-  "outputDirectory": ".next",
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "env": {
-    "NEXT_PUBLIC_API_URL": "@api-url",
-    "NEXT_PUBLIC_READ_TOKEN": "@read-token"
-  }
+  "crons": [
+    {
+      "path": "/api/cron/digest",
+      "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/cron/digest",
+      "schedule": "30 15 * * *"
+    }
+  ]
 }
