@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { dayOfLocal, type ParserResult, type UsageRecord } from "../types.js";
-import { incrementalRange, markRead, walkFiles, type DashState } from "../state.js";
+import { incrementalRange, markRead, mergeFileRecords, pruneFileRecords, walkFiles, type DashState } from "../state.js";
 
 function num(v: unknown): number {
   const n = Number(v);
@@ -30,13 +30,48 @@ export function parseCodex(
   const files = walkFiles([root], { extensions: [".jsonl"], minMtimeMs: windowStartMs - 36 * 3600 * 1000 });
   const records: UsageRecord[] = [];
   const sessions = new Set<string>();
+  const liveKeys = new Set<string>();
+  const startDay = dayOfLocal(windowStartMs);
   let skipped = 0;
+
+  // Recover session/model context when resuming mid-file (context lines live at file head).
+  const recoverContext = (file: string): { sessionId: string; model: string } => {
+    let sessionId = "", model = "";
+    try {
+      const fd = fs.openSync(file, "r");
+      try {
+        const n = Math.min(fs.fstatSync(fd).size, 131072);
+        const buf = Buffer.alloc(n);
+        fs.readSync(fd, buf, 0, n, 0);
+        for (const line of buf.toString("utf8").split("\n").slice(0, 400)) {
+          try {
+            const o = JSON.parse(line.trim());
+            if (o?.type === "session_meta" && o?.payload?.id) sessionId = String(o.payload.id);
+            const m = o?.type === "turn_context" ? (o?.payload?.model ?? o?.payload?.model_name) : null;
+            if (m) model = String(m);
+          } catch { /* ignore */ }
+        }
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch { /* ignore */ }
+    return { sessionId, model };
+  };
 
   for (const file of files) {
     let st: fs.Stats;
     try { st = fs.statSync(file); } catch { skipped++; continue; }
-    const { start, fresh } = incrementalRange(state, `codex:${file}`, st.size, st.mtimeMs);
-    if (fresh) { skipped++; continue; }
+    const key = `codex:${file}`;
+    liveKeys.add(key);
+    const { start, fresh } = incrementalRange(state, key, st.size, st.mtimeMs);
+    if (fresh) {
+      for (const r of mergeFileRecords(state, key, [], startDay)) {
+        sessions.add(r.sessionId);
+        records.push(r);
+      }
+      continue;
+    }
+    const freshRecs: UsageRecord[] = [];
     try {
       const fd = fs.openSync(file, "r");
       let text = "";
@@ -49,6 +84,7 @@ export function parseCodex(
       }
       let sessionId = "";
       let model = "";
+      if (start > 0) ({ sessionId, model } = recoverContext(file));
       let prevSig = "";
       for (const line of text.split("\n")) {
         const t = line.trim();
@@ -85,7 +121,7 @@ export function parseCodex(
         if (!dayFilter(day)) continue;
         const sid = sessionId || path.basename(file, ".jsonl");
         sessions.add(sid);
-        records.push({
+        freshRecs.push({
           day, provider: "codex", model,
           uncached: Math.max(0, input - cached - cacheWrite),
           cached, cacheCreation: cacheWrite, output,
@@ -95,11 +131,16 @@ export function parseCodex(
           dedupeKey: `${sid}:${ts}:${sig}`,
         });
       }
-      markRead(state, `codex:${file}`, st.size, st.mtimeMs, st.size);
+      markRead(state, key, st.size, st.mtimeMs, st.size);
+      for (const r of mergeFileRecords(state, key, freshRecs, startDay)) {
+        sessions.add(r.sessionId);
+        records.push(r);
+      }
     } catch {
       skipped++;
     }
   }
+  pruneFileRecords(state, liveKeys);
 
   return {
     records,

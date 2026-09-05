@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { dayOfLocal, type ParserResult, type UsageRecord } from "../types.js";
-import { incrementalRange, markRead, walkFiles, type DashState } from "../state.js";
+import { incrementalRange, markRead, mergeFileRecords, pruneFileRecords, walkFiles, type DashState } from "../state.js";
 
 function num(v: unknown): number {
   const n = Number(v);
@@ -20,14 +20,25 @@ export function parseGrok(
   const records: UsageRecord[] = [];
   const sessions = new Set<string>();
   const seen = new Set<string>();
+  const liveKeys = new Set<string>();
+  const startDay = dayOfLocal(windowStartMs);
   let skipped = 0;
   const slack = windowStartMs - 36 * 3600 * 1000;
 
   for (const file of files) {
     let st: fs.Stats;
     try { st = fs.statSync(file); } catch { skipped++; continue; }
-    const { start, fresh } = incrementalRange(state, `grok:${file}`, st.size, st.mtimeMs);
-    if (fresh) { skipped++; continue; }
+    const key = `grok:${file}`;
+    liveKeys.add(key);
+    const { start, fresh } = incrementalRange(state, key, st.size, st.mtimeMs);
+    if (fresh) {
+      for (const r of mergeFileRecords(state, key, [], startDay)) {
+        sessions.add(r.sessionId);
+        records.push(r);
+      }
+      continue;
+    }
+    const freshRecs: UsageRecord[] = [];
     try {
       const fd = fs.openSync(file, "r");
       let text = "";
@@ -68,7 +79,7 @@ export function parseGrok(
           const day = dayOfLocal(tsMs);
           if (!dayFilter(day)) continue;
           sessions.add(sessionId);
-          records.push({
+          freshRecs.push({
             day, provider: "grok", model,
             uncached: Math.max(0, input - cached - created),
             cached, cacheCreation: created, output,
@@ -78,11 +89,16 @@ export function parseGrok(
           });
         }
       }
-      markRead(state, `grok:${file}`, st.size, st.mtimeMs, st.size);
+      markRead(state, key, st.size, st.mtimeMs, st.size);
+      for (const r of mergeFileRecords(state, key, freshRecs, startDay)) {
+        sessions.add(r.sessionId);
+        records.push(r);
+      }
     } catch {
       skipped++;
     }
   }
+  pruneFileRecords(state, liveKeys);
 
   return {
     records,

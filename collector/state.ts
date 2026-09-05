@@ -9,8 +9,12 @@ export interface FileCacheEntry {
 }
 
 export interface DashState {
+  v: 2;
   lastPushDay: string | null;
   fileCache: Record<string, FileCacheEntry>;
+  /** Per-file raw records already read. Lets incremental scans skip I/O while
+   *  still pushing FULL-day totals (server upserts replace the whole day). */
+  fileRecords: Record<string, import("./types.js").UsageRecord[]>;
 }
 
 function statePath(dataDirOverride?: string): string {
@@ -25,10 +29,15 @@ export function loadState(dataDirOverride?: string): { state: DashState; path: s
   try {
     const raw = fs.readFileSync(p, "utf8");
     const parsed = JSON.parse(raw) as DashState;
+    if ((parsed as DashState).v !== 2) {
+      // Schema changed (per-file record cache added): re-baseline, keep lastPushDay.
+      return { state: { v: 2, lastPushDay: (parsed as DashState).lastPushDay ?? null, fileCache: {}, fileRecords: {} }, path: p };
+    }
     if (!parsed.fileCache) parsed.fileCache = {};
+    if (!parsed.fileRecords) parsed.fileRecords = {};
     return { state: parsed, path: p };
   } catch {
-    return { state: { lastPushDay: null, fileCache: {} }, path: p };
+    return { state: { v: 2, lastPushDay: null, fileCache: {}, fileRecords: {} }, path: p };
   }
 }
 
@@ -59,6 +68,50 @@ export function incrementalRange(
 
 export function markRead(state: DashState, file: string, size: number, mtime: number, offset: number): void {
   state.fileCache[file] = { size, mtime, offset };
+}
+
+const MAX_PER_FILE = 20_000;
+
+/**
+ * Merge newly-read records into the per-file cache and return the file's full
+ * contribution (cached + new), evicting days older than `startDay`.
+ * Dedupe by provider+dedupeKey so re-reads (rotation/shrink) stay idempotent.
+ */
+export function mergeFileRecords(
+  state: DashState,
+  key: string,
+  fresh: UsageRecordLite[],
+  startDay: string,
+): import("./types.js").UsageRecord[] {
+  if (!state.fileRecords) state.fileRecords = {};
+  const prev = state.fileRecords[key] ?? [];
+  const byKey = new Map<string, import("./types.js").UsageRecord>();
+  for (const r of prev) {
+    if (r.day >= startDay) byKey.set(`${r.provider}:${r.dedupeKey}`, r);
+  }
+  for (const r of fresh as import("./types.js").UsageRecord[]) {
+    if (r.day < startDay) continue;
+    byKey.set(`${r.provider}:${r.dedupeKey}`, r);
+  }
+  let all = [...byKey.values()].sort((a, b) => (a.day < b.day ? -1 : 1));
+  if (all.length > MAX_PER_FILE) all = all.slice(all.length - MAX_PER_FILE);
+  state.fileRecords[key] = all;
+  return all;
+}
+
+/** Drop cache entries for files that no longer exist (bounded growth). */
+export function pruneFileRecords(state: DashState, liveKeys: Set<string>): void {
+  if (!state.fileRecords) return;
+  for (const k of Object.keys(state.fileRecords)) {
+    if (!liveKeys.has(k)) delete state.fileRecords[k];
+  }
+}
+
+// Local structural type to avoid a hard import cycle at runtime (types-only).
+interface UsageRecordLite {
+  day: string;
+  provider: string;
+  dedupeKey: string;
 }
 
 /** Recursively list files matching predicate, filtered by mtime. Never throws. */

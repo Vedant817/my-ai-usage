@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { dayOfLocal, type ParserResult, type UsageRecord } from "../types.js";
-import { incrementalRange, markRead, walkFiles, type DashState } from "../state.js";
+import { incrementalRange, markRead, mergeFileRecords, pruneFileRecords, walkFiles, type DashState } from "../state.js";
 
 function num(v: unknown): number {
   const n = Number(v);
@@ -40,13 +40,25 @@ export function parseClaude(
   const records: UsageRecord[] = [];
   const sessions = new Set<string>();
   const seen = new Set<string>();
+  const liveKeys = new Set<string>();
+  const startDay = dayOfLocal(windowStartMs);
   let skipped = 0;
 
   for (const file of files) {
     let st: fs.Stats;
     try { st = fs.statSync(file); } catch { skipped++; continue; }
-    const { start, fresh } = incrementalRange(state, `claude:${file}`, st.size, st.mtimeMs);
-    if (fresh) { skipped++; continue; }
+    const key = `claude:${file}`;
+    liveKeys.add(key);
+    const { start, fresh } = incrementalRange(state, key, st.size, st.mtimeMs);
+    if (fresh) {
+      // Unchanged on disk: serve this file's cached contribution so day totals stay full.
+      for (const r of mergeFileRecords(state, key, [], startDay)) {
+        sessions.add(r.sessionId);
+        records.push(r);
+      }
+      continue;
+    }
+    const freshRecs: UsageRecord[] = [];
     let fd: number | null = null;
     try {
       fd = fs.openSync(file, "r");
@@ -77,7 +89,7 @@ export function parseClaude(
         if (!input && !cached && !created && !output) continue;
         const cost = obj.costUSD != null ? Number(obj.costUSD) : (usage.costUSD != null ? Number(usage.costUSD) : null);
         sessions.add(sessionId);
-        records.push({
+        freshRecs.push({
           day, provider: "claude", model,
           uncached: Math.max(0, input - cached - created),
           cached, cacheCreation: created, output,
@@ -86,13 +98,18 @@ export function parseClaude(
           sessionId, dedupeKey: dedupe || `${file}:${ts}:${model}`,
         });
       }
-      markRead(state, `claude:${file}`, st.size, st.mtimeMs, st.size);
+      markRead(state, key, st.size, st.mtimeMs, st.size);
+      for (const r of mergeFileRecords(state, key, freshRecs, startDay)) {
+        sessions.add(r.sessionId);
+        records.push(r);
+      }
     } catch {
       skipped++;
     } finally {
       if (fd != null) try { fs.closeSync(fd); } catch { /* ignore */ }
     }
   }
+  pruneFileRecords(state, liveKeys);
 
   return {
     records,
