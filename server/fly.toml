@@ -1,0 +1,20 @@
+app = 'usage-dash-api'
+primary_region = 'bom'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[mounts]]
+  source = 'usage_data'
+  destination = '/data'
+
+[env]
+  PORT = '8787'
+  DATABASE_URL = '/data/usage.db'

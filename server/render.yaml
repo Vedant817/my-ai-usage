@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: usage-dash-api
+    runtime: docker
+    dockerfilePath: ./server/Dockerfile
+    plan: starter
+    healthCheckPath: /health
+    disk:
+      name: usage-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DATABASE_URL
+        value: /data/usage.db
+      - key: INGEST_TOKEN
+        sync: false
+      - key: READ_TOKEN
+        sync: false
+      - key: SITE_ORIGIN
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
