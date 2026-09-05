@@ -87,8 +87,7 @@ export async function runDigestOnce(reason: string): Promise<void> {
   const threshold = Number(process.env.ALERT_THRESHOLD_USD ?? 20);
   const agg = aggregateDay(day);
   const total = Object.values(agg.byProvider).reduce((a, b) => a + b.costUsd, 0);
-  const isAlert = reason === "alert" || total > threshold;
-  const msg = isAlert && reason !== "scheduled" ? `ALERT over $${threshold}: ${text}` : text;
+  const msg = total > threshold ? `ALERT over $${threshold}: ${text}` : text;
   const okTg = await sendTelegram(msg);
   const okMail = okTg ? true : await sendEmailFallback(msg);
   console.log(JSON.stringify({ digest: okTg || okMail ? "sent" : "no-channel", reason, day, total }));
