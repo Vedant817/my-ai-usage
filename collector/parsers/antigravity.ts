@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { openReadonly } from "../sqlite.js";
 import { dayOfLocal, type ParserResult, type UsageRecord } from "../types.js";
 import type { DashState } from "../state.js";
 
@@ -41,11 +41,11 @@ function extractModelsFromBlob(blob: Buffer | Uint8Array | string): string[] {
   return [...found];
 }
 
-export function parseAntigravity(
+export async function parseAntigravity(
   state: DashState,
   windowStartMs: number,
   dayFilter: (day: string) => boolean,
-): ParserResult {
+): Promise<ParserResult> {
   void state;
   const records: UsageRecord[] = [];
   const sessions = new Set<string>();
@@ -60,25 +60,26 @@ export function parseAntigravity(
         const st = fs.statSync(dbPath);
         if (st.mtimeMs < slack) { skipped++; continue; }
         scannedFiles++;
-        const db = new DatabaseSync(dbPath, { readOnly: true, timeout: 5 });
+        const db = await openReadonly(dbPath);
         try {
           // Schema varies by version; probe tables defensively.
-          const tables = db.prepare(
+          const tables = db.rows(
             `SELECT name FROM sqlite_master WHERE type='table'`,
-          ).all() as Array<{ name: string }>;
+          ) as Array<{ name: string }>;
           const names = new Set(tables.map((t) => t.name));
           const convTable = names.has("conversations") ? "conversations"
             : names.has("conversation") ? "conversation" : null;
           if (!convTable) { skipped++; continue; }
-          const cols = db.prepare(`PRAGMA table_info(${convTable})`).all() as Array<{ name: string }>;
+          const cols = db.rows(`PRAGMA table_info(${convTable})`) as Array<{ name: string }>;
           const colNames = new Set(cols.map((c) => c.name));
           const hasUpdated = colNames.has("updated_at");
           const idCol = colNames.has("id") ? "id" : "rowid";
-          const rows = db.prepare(
+          const rows = db.rows(
             hasUpdated
               ? `SELECT * FROM ${convTable} WHERE updated_at >= ? LIMIT 5000`
               : `SELECT * FROM ${convTable} LIMIT 5000`,
-          ).all(...(hasUpdated ? [Math.floor(slack / 1000), Math.floor(slack)] : [])) as Array<Record<string, any>>;
+            ...(hasUpdated ? [Math.floor(slack / 1000), Math.floor(slack)] : []),
+          ) as Array<Record<string, any>>;
           // updated_at may be seconds or ms; accept either by also filtering in JS.
           for (const row of rows) {
             try {

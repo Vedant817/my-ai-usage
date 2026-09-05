@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { openReadonly } from "../sqlite.js";
 import { dayOfLocal, type ParserResult, type UsageRecord } from "../types.js";
 import { walkFiles } from "../state.js";
 import type { DashState } from "../state.js";
@@ -25,11 +25,11 @@ function toMs(v: unknown, fallback: number): number {
   return fallback;
 }
 
-export function parseOpencode(
+export async function parseOpencode(
   state: DashState,
   windowStartMs: number,
   dayFilter: (day: string) => boolean,
-): ParserResult {
+): Promise<ParserResult> {
   void state;
   const records: UsageRecord[] = [];
   const sessions = new Set<string>();
@@ -71,12 +71,13 @@ export function parseOpencode(
     const st = fs.statSync(dbPath);
     if (st.mtimeMs >= slack) {
       scannedFiles++;
-      const db = new DatabaseSync(dbPath, { readOnly: true, timeout: 5 });
+      const db = await openReadonly(dbPath);
       try {
-        const rows = db.prepare(
+        const rows = db.rows(
           `SELECT id, session_id AS sessionId, time_created AS timeCreated, data
            FROM message WHERE json_extract(data,'$.role')='assistant' AND time_created >= ?`,
-        ).all(Math.floor(slack)) as Array<{ id: string; sessionId: string; timeCreated: number; data: string }>;
+          Math.floor(slack),
+        ) as Array<{ id: string; sessionId: string; timeCreated: number; data: string }>;
         for (const r of rows) {
           try {
             const d = JSON.parse(r.data as unknown as string);

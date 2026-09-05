@@ -166,22 +166,22 @@ async function main(): Promise<void> {
   const pricer = await Pricer.load();
 
   // Run all 5 providers; one failure never fails the whole run.
-  const results = [];
-  const run = (fn: () => ReturnType<typeof parseClaude>, name: string) => {
+  const results: Array<{ records: UsageRecord[]; stats: { provider: any; scannedFiles: number; skipped: number; distinctSessions: number; records: number; note?: string } }> = [];
+  const run = async (fn: () => any, name: string) => {
     try {
-      return fn();
+      results.push(await fn());
     } catch (e) {
-      return {
+      results.push({
         records: [] as UsageRecord[],
         stats: { provider: name as any, scannedFiles: 0, skipped: 0, distinctSessions: 0, records: 0, note: `parser crashed (non-fatal): ${e instanceof Error ? e.message : String(e)}` },
-      };
+      });
     }
   };
-  results.push(run(() => parseClaude(state, windowStartMs, dayFilter), "claude"));
-  results.push(run(() => parseCodex(state, windowStartMs, dayFilter), "codex"));
-  results.push(run(() => parseGrok(state, windowStartMs, dayFilter), "grok"));
-  results.push(run(() => parseOpencode(state, windowStartMs, dayFilter), "opencode"));
-  results.push(run(() => parseAntigravity(state, windowStartMs, dayFilter), "antigravity"));
+  await run(() => parseClaude(state, windowStartMs, dayFilter), "claude");
+  await run(() => parseCodex(state, windowStartMs, dayFilter), "codex");
+  await run(() => parseGrok(state, windowStartMs, dayFilter), "grok");
+  await run(() => parseOpencode(state, windowStartMs, dayFilter), "opencode");
+  await run(() => parseAntigravity(state, windowStartMs, dayFilter), "antigravity");
 
   const allRecords = results.flatMap((r) => r.records);
   // Ensure every provider appears in output even when zero.
