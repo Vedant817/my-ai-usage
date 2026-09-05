@@ -63,10 +63,65 @@ export async function parseAntigravity(
         const db = await openReadonly(dbPath);
         try {
           // Schema varies by version; probe tables defensively.
+          // Observed (2026): trajectory_meta / steps / gen_metadata / executor_metadata.
+          // Legacy: conversations / conversation with updated_at.
           const tables = db.rows(
             `SELECT name FROM sqlite_master WHERE type='table'`,
           ) as Array<{ name: string }>;
           const names = new Set(tables.map((t) => t.name));
+          const convId = path.basename(dbPath, ".db");
+          const day = dayOfLocal(st.mtimeMs);
+          if (!dayFilter(day)) { skipped++; continue; }
+          sessions.add(convId);
+
+          if (names.has("gen_metadata")) {
+            // One gen_metadata row ≈ one turn. No per-turn timestamps stored,
+            // so attribute to file-mtime day (documented estimate).
+            let rows: Array<Record<string, any>> = [];
+            try {
+              rows = db.rows(`SELECT idx, data FROM gen_metadata LIMIT 20000`) as Array<Record<string, any>>;
+            } catch { rows = []; }
+            for (const row of rows) {
+              try {
+                const v: unknown = (row as any).data;
+                const buf = typeof v === "string" ? v : Buffer.isBuffer(v) ? v : v instanceof Uint8Array ? Buffer.from(v) : null;
+                let models = buf ? extractModelsFromBlob(buf) : [];
+                models = [...new Set(models)];
+                if (models.length === 0) models = ["gemini-2.5-flash"];
+                for (const model of models.slice(0, 2)) {
+                  records.push({
+                    day, provider: "antigravity", model,
+                    uncached: AVG_INPUT, cached: AVG_CACHED, cacheCreation: 0,
+                    output: AVG_OUTPUT, reasoning: 0,
+                    reportedCost: null, sessionId: convId,
+                    dedupeKey: `${convId}:${String((row as any).idx ?? records.length)}:${model}`,
+                    estimated: true,
+                  });
+                }
+              } catch { skipped++; }
+            }
+            // Sibling JSONL sidecar (if present) can carry extra model hints; fold in as turns too.
+            try {
+              const sidecar = dbPath.replace(/\.db$/, ".jsonl");
+              const sst = fs.statSync(sidecar);
+              if (sst.mtimeMs >= slack) {
+                const text = fs.readFileSync(sidecar, "utf8").slice(0, 200_000);
+                const models = [...new Set(extractModelsFromBlob(text))];
+                for (const model of models.slice(0, 3)) {
+                  records.push({
+                    day, provider: "antigravity", model,
+                    uncached: AVG_INPUT, cached: AVG_CACHED, cacheCreation: 0,
+                    output: AVG_OUTPUT, reasoning: 0,
+                    reportedCost: null, sessionId: convId,
+                    dedupeKey: `${convId}:sidecar:${model}`,
+                    estimated: true,
+                  });
+                }
+              }
+            } catch { /* no sidecar */ }
+            continue;
+          }
+
           const convTable = names.has("conversations") ? "conversations"
             : names.has("conversation") ? "conversation" : null;
           if (!convTable) { skipped++; continue; }
@@ -89,8 +144,8 @@ export async function parseAntigravity(
               if (!Number.isFinite(tsMs)) tsMs = st.mtimeMs;
               else if (tsMs < 1e12) tsMs = tsMs * 1000;
               if (tsMs < slack) continue;
-              const day = dayOfLocal(tsMs);
-              if (!dayFilter(day)) continue;
+              const rday = dayOfLocal(tsMs);
+              if (!dayFilter(rday)) continue;
               // Collect candidate blobs/texts
               const blobs: Array<Buffer | string> = [];
               for (const [k, v] of Object.entries(row)) {
@@ -114,10 +169,10 @@ export async function parseAntigravity(
               // One turn per model per conversation per day (estimate). Count rows as turns.
               // If the row embeds multiple turns we still count 1 to stay conservative.
               for (const model of models) {
-                const key = `${id}:${day}:${model}`;
+                const key = `${id}:${rday}:${model}`;
                 sessions.add(id);
                 records.push({
-                  day, provider: "antigravity", model,
+                  day: rday, provider: "antigravity", model,
                   uncached: AVG_INPUT, cached: AVG_CACHED, cacheCreation: 0,
                   output: AVG_OUTPUT, reasoning: 0,
                   reportedCost: null, sessionId: id, dedupeKey: key,
