@@ -25,11 +25,17 @@ Light database: plain **SQLite** (`node:sqlite`, no native addons, no Postgres).
 ```
 collector/  Bun+TS — index.ts, parsers/{claude,codex,grok,opencode,antigravity}.ts,
             pricing.ts, state.ts, types.ts, sqlite.ts, .env.example
-server/     Hono + SQLite — index.ts, routes.ts, db.ts, digest.ts,
-            Dockerfile, fly.toml, render.yaml, .env.example, verify.mjs
-web/        Next.js + TypeScript PWA — app/{layout,page,globals.css},
-            lib/{api,format}, public/{manifest.webmanifest,sw.js,icons/}
+server/     Self-host alternative (Hono + SQLite) — index.ts, routes.ts, db.ts,
+            digest.ts, Dockerfile, fly.toml, render.yaml, .env.example, verify.mjs
+web/        Vercel app (Next.js + TS PWA + API routes) — app/{layout,page,globals.css},
+            app/api/{v1/{ingest,summary,last-day},health,cron/digest},
+            lib/{api,format,store,digest}, public/{manifest.webmanifest,sw.js,icons/}
 ```
+
+Deploy target: **everything on Vercel** (one project from `web/`).
+Web page + API routes + cron digest run together; persistence is Turso
+(libSQL — still light SQLite semantics, no Postgres). `server/` remains as a
+Fly.io/Render self-host alternative with identical API semantics.
 
 ## 1. Collector (PC, every 15 min)
 
@@ -64,7 +70,49 @@ Schedule:
   (see `collector/schedule-windows.ps1`).
 - **Linux**: `collector/usage-dash.{service,timer}` (systemd, 15 min + boot).
 
-## 2. Server (always on — Fly.io or Render)
+## 2. API + DB (Vercel + Turso — primary path)
+
+The API lives in the web app (`web/app/api/...`), so one Vercel project hosts
+page + API + digest cron. `server/` is the self-host alternative (Fly/Render).
+
+```powershell
+cd web
+npm install
+cp .env.example .env.local   # see credentials below
+npm run dev                  # local: API uses file:./data/usage.db
+```
+
+| Endpoint | Auth | Behaviour |
+|---|---|---|
+| `POST /v1/ingest` | `Bearer $INGEST_TOKEN` | Upsert by `(deviceId, day)` → `{ok:true}` (rewritten to `/api/v1/ingest`) |
+| `GET /v1/summary?day=YYYY-MM-DD` | `Bearer $READ_TOKEN` | Latest day ≤ requested; `isStale` when `now-lastPushAt>30min` or day mismatch; includes 30-day `daily` + `models` |
+| `GET /v1/last-day` | either token | `{lastDay}` (collector backfill anchor) |
+| `GET /health` | none | `{ok:true}` |
+| `GET /api/cron/digest` | `Bearer $CRON_SECRET` | Telegram/email digest for the last day (Vercel Cron 09:00 + 21:00 IST) |
+
+Deploy:
+
+1. Push this repo to GitHub.
+2. Vercel → Add New → Project → import repo, set **Root Directory to `web/`**.
+3. Create a free Turso database (`turso db create usage-dash`, `turso db show
+   --url`, `turso db tokens create`) — or via https://turso.tech dashboard.
+4. Add env vars in Vercel (Production + Preview): `TURSO_DATABASE_URL`,
+   `TURSO_AUTH_TOKEN`, `INGEST_TOKEN`, `READ_TOKEN`, `CRON_SECRET`,
+   `NEXT_PUBLIC_API_URL` (= your `https://<app>.vercel.app`),
+   `NEXT_PUBLIC_READ_TOKEN` (= same as `READ_TOKEN`), plus Telegram/Resend vars.
+5. Deploy. Cron jobs (`vercel.json`: 03:30 + 15:30 UTC = 09:00 + 21:00 IST) call
+   `/api/cron/digest` automatically with `CRON_SECRET`.
+
+Telegram digest text (overspend prefixed with `ALERT over $20:`):
+
+```
+Usage 2026-09-04 $12.40 (Codex $5.00 80k, Claude $4.00 60k, Grok $1.00, OpenCode $2.00, Antigravity ~$0.40 est.) Updated 10m ago
+```
+
+Email fallback via Resend (`RESEND_API_KEY` + `DIGEST_EMAIL_TO`) if Telegram is
+unreachable. Without either configured the cron returns `no-channel`.
+
+### Self-host alternative (Fly.io / Render)
 
 ```powershell
 cd server
@@ -77,29 +125,10 @@ npx tsx verify.mjs     # 13 endpoint/contract checks against throwaway :memory: 
 
 Generate tokens: `openssl rand -hex 32` (separate values for ingest/read).
 
-| Endpoint | Auth | Behaviour |
-|---|---|---|
-| `POST /v1/ingest` | `Bearer $INGEST_TOKEN` | Upsert by `(deviceId, day)` → `{ok:true}` |
-| `GET /v1/summary?day=YYYY-MM-DD` | `Bearer $READ_TOKEN` | Latest day ≤ requested; `isStale` when `now-lastPushAt>30min` or day mismatch; includes 30-day `daily` + `models` |
-| `GET /v1/last-day` | either token | `{lastDay}` (collector backfill anchor) |
-| `GET /health` | none | `{ok:true}` |
-
 CORS allows only `$SITE_ORIGIN`. No provider keys on the server.
-
-Deploy:
 
 - **Fly.io**: `cd server && fly launch` (uses `fly.toml`; `/data/usage.db` volume).
 - **Render**: new Web Service from `server/render.yaml` (persistent disk at `/data`).
-
-Telegram digest runs in-process at **09:00 + 21:00** (`$CRON_TZ`) plus an
-`ALERT over $N` prefix when the day exceeds `$ALERT_THRESHOLD_USD` (default 20):
-
-```
-Usage 2026-09-04 $12.40 (Codex $5.00 80k, Claude $4.00 60k, Grok $1.00, OpenCode $2.00, Antigravity ~$0.40 est.) Updated 10m ago
-```
-
-Email fallback via Resend (`RESEND_API_KEY` + `DIGEST_EMAIL_TO`) if Telegram is
-unreachable. Without either configured the loop stays off.
 
 ## 3. Website (Vercel)
 
@@ -136,16 +165,20 @@ server env vars and redeploy.
 
 ## Credentials (exact env)
 
-- Collector `.env`: `API_URL, INGEST_TOKEN, DEVICE_ID, DEVICE_LABEL`
-  (no `TELEGRAM_*` here).
-- Server `.env`: `DATABASE_URL, INGEST_TOKEN, READ_TOKEN, TELEGRAM_BOT_TOKEN,
-  TELEGRAM_CHAT_ID, RESEND_API_KEY (optional), CRON_TZ` — see
-  `server/.env.example`.
-- Web `.env.local`: `NEXT_PUBLIC_API_URL, NEXT_PUBLIC_READ_TOKEN`
-  (`VITE_API_URL` / `VITE_READ_TOKEN` also honoured as fallback).
+- Collector `.env`: `API_URL` (= `https://<app>.vercel.app`, no path suffix —
+  `/v1/*` is rewritten to the API routes), `INGEST_TOKEN, DEVICE_ID,
+  DEVICE_LABEL` (no `TELEGRAM_*` here).
+- Vercel env vars: `TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, INGEST_TOKEN,
+  READ_TOKEN, CRON_SECRET, NEXT_PUBLIC_API_URL, NEXT_PUBLIC_READ_TOKEN`
+  (+ `TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, RESEND_API_KEY (optional),
+  DIGEST_EMAIL_TO (optional), ALERT_THRESHOLD_USD (default 20)`) — see
+  `web/.env.example`.
+- Self-host `server/.env` (only if using Fly/Render instead): `DATABASE_URL,
+  INGEST_TOKEN, READ_TOKEN, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+  RESEND_API_KEY (optional), CRON_TZ`.
 - Provider API keys: **none required**. Never upload auth/credential files.
 
-## Acceptance (verified 2026-09-05)
+## Acceptance (verified 2026-09-05, Vercel-style stack E2E 2026-09-06)
 
 - [x] `collector --dry-run` prints all 5 providers, no network push.
 - [x] Repeat runs are idempotent (incremental cache returns identical totals).
