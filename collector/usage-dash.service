@@ -1,0 +1,6 @@
+[Unit]
+Description=Usage dashboard collector push
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/env bun /opt/my-ai-usage/collector/index.ts --push
