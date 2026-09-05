@@ -1,0 +1,9 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": ".next",
+  "framework": "nextjs",
+  "env": {
+    "NEXT_PUBLIC_API_URL": "@api-url",
+    "NEXT_PUBLIC_READ_TOKEN": "@read-token"
+  }
+}
