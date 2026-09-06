@@ -1,7 +1,7 @@
 # AI Usage Dashboard
 
 Personal dashboard for AI coding usage: tokens + USD cost per provider
-(`codex`, `claude`, `grok`, `opencode`, `antigravity`).
+(`codex`, `claude`, `grok`, `opencode`, `antigravity`, `zed`).
 
 One data source, two surfaces:
 
@@ -23,7 +23,7 @@ Light database: plain **SQLite** (`node:sqlite`, no native addons, no Postgres).
 ## Repo layout
 
 ```
-collector/  Bun+TS — index.ts, parsers/{claude,codex,grok,opencode,antigravity}.ts,
+collector/  Bun+TS — index.ts, parsers/{claude,codex,grok,opencode,antigravity,zed}.ts,
             pricing.ts, state.ts, types.ts, sqlite.ts, .env.example
 server/     Self-host alternative (Hono + SQLite) — index.ts, routes.ts, db.ts,
             digest.ts, Dockerfile, fly.toml, render.yaml, .env.example, verify.mjs
@@ -60,6 +60,15 @@ bun run index.ts -- --push --data-dir D:\usage-state   # state dir override
   estimated (`est.` in UI).
 - Token math: `total = uncached + cached + cacheCreation + output`; reasoning is
   a subset of output, never added.
+- **Zed**: reads `%LOCALAPPDATA%\Zed\threads\threads.db` (override with
+  `ZED_THREADS_DB`; macOS/Linux paths supported). Thread payloads are
+  zstd-compressed JSON containing per-request `request_token_usage` (real
+  measured tokens, not estimates). Only threads routed through Zed-hosted
+  models (`model.provider == "zed.dev"`) are counted — threads via own API
+  keys, Copilot, or local models are skipped (no Zed billing impact). Usage is
+  cumulative per thread, so a whole thread is attributed to its creation day
+  (stable across runs). Costs use the rate table **×1.1** (Zed bills provider
+  list price +10%).
 - Never reads `~/.claude/.credentials.json` / `~/.codex/auth.json`; provider API
   keys are not used anywhere.
 
@@ -186,6 +195,9 @@ server env vars and redeploy.
 - [x] `verify.mjs`: 13/13 (auth, upsert-replace, fallback, no absolute paths in DB).
 - [x] DB/file secret scan: no prompts, tokens, or credential paths stored.
 - [x] Antigravity rows flagged estimated end-to-end (parser → API → UI badge).
+- [x] Zed parser verified: real `threads.db` parses (2 local threads correctly
+  skipped as Copilot-routed, 0 `zed.dev` records); synthetic fixture proves
+  extraction of exact tokens, cumulative fallback, and the ×1.1 cost markup.
 - [x] `next build` clean; `/`, `/manifest.webmanifest`, `/sw.js` all serve 200.
 - [ ] Telegram message received twice daily — needs real bot token (code path
   exercised with `--once`, delivery pending credentials).
