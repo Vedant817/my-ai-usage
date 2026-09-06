@@ -12,6 +12,10 @@ import { parseCodex } from "./parsers/codex.js";
 import { parseGrok } from "./parsers/grok.js";
 import { parseOpencode } from "./parsers/opencode.js";
 import { parseAntigravity } from "./parsers/antigravity.js";
+import { parseZed } from "./parsers/zed.js";
+
+// Multiplier on computed cost per provider (Zed bills list price +10%).
+const PROVIDER_COST_MARKUP: Record<string, number> = { zed: 1.1 };
 
 function loadEnv(): void {
   for (const f of [path.join(process.cwd(), ".env"), path.join(process.cwd(), "collector", ".env")]) {
@@ -107,6 +111,8 @@ function aggregate(records: UsageRecord[], pricer: Pricer, allowedDays: Set<stri
         const p = pricer.price(r.model, r, null);
         cost = p.costUsd;
       }
+      // Provider host markups (Zed bills provider list price +10%).
+      cost = cost * (PROVIDER_COST_MARKUP[r.provider] ?? 1);
       if (!byProvider[r.provider]) byProvider[r.provider] = { ...emptyBucket() };
       const b = byProvider[r.provider];
       b.uncached += r.uncached; b.cached += r.cached; b.cacheCreation += r.cacheCreation;
@@ -165,7 +171,7 @@ async function main(): Promise<void> {
 
   const pricer = await Pricer.load();
 
-  // Run all 5 providers; one failure never fails the whole run.
+  // Run all providers; one failure never fails the whole run.
   const results: Array<{ records: UsageRecord[]; stats: { provider: any; scannedFiles: number; skipped: number; distinctSessions: number; records: number; note?: string } }> = [];
   const run = async (fn: () => any, name: string) => {
     try {
@@ -182,6 +188,7 @@ async function main(): Promise<void> {
   await run(() => parseGrok(state, windowStartMs, dayFilter), "grok");
   await run(() => parseOpencode(state, windowStartMs, dayFilter), "opencode");
   await run(() => parseAntigravity(state, windowStartMs, dayFilter), "antigravity");
+  await run(() => parseZed(state, windowStartMs, dayFilter), "zed");
 
   const allRecords = results.flatMap((r) => r.records);
   // Ensure every provider appears in output even when zero.
