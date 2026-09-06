@@ -9,7 +9,7 @@ export interface FileCacheEntry {
 }
 
 export interface DashState {
-  v: 2;
+  v: 3;
   lastPushDay: string | null;
   fileCache: Record<string, FileCacheEntry>;
   /** Per-file raw records already read. Lets incremental scans skip I/O while
@@ -29,15 +29,15 @@ export function loadState(dataDirOverride?: string): { state: DashState; path: s
   try {
     const raw = fs.readFileSync(p, "utf8");
     const parsed = JSON.parse(raw) as DashState;
-    if ((parsed as DashState).v !== 2) {
-      // Schema changed (per-file record cache added): re-baseline, keep lastPushDay.
-      return { state: { v: 2, lastPushDay: (parsed as DashState).lastPushDay ?? null, fileCache: {}, fileRecords: {} }, path: p };
+    if ((parsed as DashState).v !== 3) {
+      // Schema changed (window-independent record cache): re-baseline, keep lastPushDay.
+      return { state: { v: 3, lastPushDay: (parsed as DashState).lastPushDay ?? null, fileCache: {}, fileRecords: {} }, path: p };
     }
     if (!parsed.fileCache) parsed.fileCache = {};
     if (!parsed.fileRecords) parsed.fileRecords = {};
     return { state: parsed, path: p };
   } catch {
-    return { state: { v: 2, lastPushDay: null, fileCache: {}, fileRecords: {} }, path: p };
+    return { state: { v: 3, lastPushDay: null, fileCache: {}, fileRecords: {} }, path: p };
   }
 }
 
@@ -74,23 +74,20 @@ const MAX_PER_FILE = 20_000;
 
 /**
  * Merge newly-read records into the per-file cache and return the file's full
- * contribution (cached + new), evicting days older than `startDay`.
+ * contribution (cached + new). No day eviction: the cache is a superset and
+ * each run filters by its own window, so varying --days stays correct.
  * Dedupe by provider+dedupeKey so re-reads (rotation/shrink) stay idempotent.
  */
 export function mergeFileRecords(
   state: DashState,
   key: string,
   fresh: UsageRecordLite[],
-  startDay: string,
 ): import("./types.js").UsageRecord[] {
   if (!state.fileRecords) state.fileRecords = {};
   const prev = state.fileRecords[key] ?? [];
   const byKey = new Map<string, import("./types.js").UsageRecord>();
-  for (const r of prev) {
-    if (r.day >= startDay) byKey.set(`${r.provider}:${r.dedupeKey}`, r);
-  }
+  for (const r of prev) byKey.set(`${r.provider}:${r.dedupeKey}`, r);
   for (const r of fresh as import("./types.js").UsageRecord[]) {
-    if (r.day < startDay) continue;
     byKey.set(`${r.provider}:${r.dedupeKey}`, r);
   }
   let all = [...byKey.values()].sort((a, b) => (a.day < b.day ? -1 : 1));

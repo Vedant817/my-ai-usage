@@ -9,6 +9,10 @@ function num(v: unknown): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+// Wire semantics (xai-org/grok-build, crates/.../extensions/notification.rs):
+// each turn_completed carries THAT turn's own usage (per-prompt ledger), with
+// cost in 1e10 ticks = $1. Costs on usageIsIncomplete turns are scrubbed by the
+// CLI as untrustworthy, so we fall back to table pricing for those.
 export function parseGrok(
   state: DashState,
   windowStartMs: number,
@@ -21,7 +25,6 @@ export function parseGrok(
   const sessions = new Set<string>();
   const seen = new Set<string>();
   const liveKeys = new Set<string>();
-  const startDay = dayOfLocal(windowStartMs);
   let skipped = 0;
   const slack = windowStartMs - 36 * 3600 * 1000;
 
@@ -32,13 +35,27 @@ export function parseGrok(
     liveKeys.add(key);
     const { start, fresh } = incrementalRange(state, key, st.size, st.mtimeMs);
     if (fresh) {
-      for (const r of mergeFileRecords(state, key, [], startDay)) {
+      for (const r of mergeFileRecords(state, key, [])) {
         sessions.add(r.sessionId);
         records.push(r);
       }
       continue;
     }
     const freshRecs: UsageRecord[] = [];
+    const freshByKey = new Map<string, UsageRecord>();
+    const pushFresh = (r: UsageRecord) => {
+      const prev = freshByKey.get(r.dedupeKey);
+      if (!prev) {
+        freshByKey.set(r.dedupeKey, r);
+        freshRecs.push(r);
+        return;
+      }
+      // Same key twice in one read (e.g. retried prompt sharing prompt_id and
+      // millisecond): accumulate — both turns were billed.
+      prev.uncached += r.uncached; prev.cached += r.cached;
+      prev.cacheCreation += r.cacheCreation; prev.output += r.output;
+      prev.reasoning = Math.min(prev.reasoning + r.reasoning, prev.output);
+    };
     try {
       const fd = fs.openSync(file, "r");
       let text = "";
@@ -65,7 +82,7 @@ export function parseGrok(
         if (!modelUsage || typeof modelUsage !== "object") continue;
         for (const [model, u] of Object.entries<any>(modelUsage)) {
           const promptId = String(update.prompt_id ?? update.promptId ?? update.turn_id ?? update.turnId ?? "");
-          const key = `${sessionId}:${promptId}:${model}`;
+          const key = `${sessionId}:${promptId}:${model}:${tsMs}`;
           if (seen.has(key)) continue;
           seen.add(key);
           const input = num(u.inputTokens ?? u.input_tokens);
@@ -74,12 +91,15 @@ export function parseGrok(
           const created = num(u.cacheCreationTokens ?? u.cache_creation_input_tokens);
           const reasoning = num(u.reasoningTokens ?? u.reasoning_output_tokens);
           const ticks = u.costUsdTicks ?? u.cost_usd_ticks ?? u.costTicks;
-          const reported = ticks != null && Number.isFinite(Number(ticks)) ? Number(ticks) / 1e10 : null;
+          // Incomplete bills under-count (open subagents) so the CLI scrubs
+          // their cost; price those tokens via table instead.
+          const incomplete = update.usageIsIncomplete === true || (u as any).usageIsIncomplete === true;
+          const reported = !incomplete && ticks != null && Number.isFinite(Number(ticks)) ? Number(ticks) / 1e10 : null;
           if (!input && !output && !cached && !created && reported == null) continue;
           const day = dayOfLocal(tsMs);
           if (!dayFilter(day)) continue;
           sessions.add(sessionId);
-          freshRecs.push({
+          pushFresh({
             day, provider: "grok", model,
             uncached: Math.max(0, input - cached - created),
             cached, cacheCreation: created, output,
@@ -90,7 +110,7 @@ export function parseGrok(
         }
       }
       markRead(state, key, st.size, st.mtimeMs, st.size);
-      for (const r of mergeFileRecords(state, key, freshRecs, startDay)) {
+      for (const r of mergeFileRecords(state, key, freshRecs)) {
         sessions.add(r.sessionId);
         records.push(r);
       }

@@ -31,7 +31,6 @@ export function parseCodex(
   const records: UsageRecord[] = [];
   const sessions = new Set<string>();
   const liveKeys = new Set<string>();
-  const startDay = dayOfLocal(windowStartMs);
   let skipped = 0;
 
   // Recover session/model context when resuming mid-file (context lines live at file head).
@@ -65,7 +64,7 @@ export function parseCodex(
     liveKeys.add(key);
     const { start, fresh } = incrementalRange(state, key, st.size, st.mtimeMs);
     if (fresh) {
-      for (const r of mergeFileRecords(state, key, [], startDay)) {
+      for (const r of mergeFileRecords(state, key, [])) {
         sessions.add(r.sessionId);
         records.push(r);
       }
@@ -132,7 +131,7 @@ export function parseCodex(
         });
       }
       markRead(state, key, st.size, st.mtimeMs, st.size);
-      for (const r of mergeFileRecords(state, key, freshRecs, startDay)) {
+      for (const r of mergeFileRecords(state, key, freshRecs)) {
         sessions.add(r.sessionId);
         records.push(r);
       }

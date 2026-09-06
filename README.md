@@ -60,6 +60,10 @@ bun run index.ts -- --push --data-dir D:\usage-state   # state dir override
   estimated (`est.` in UI).
 - Token math: `total = uncached + cached + cacheCreation + output`; reasoning is
   a subset of output, never added.
+- **Grok**: `turn_completed` events carry that turn's own usage (per-prompt
+  ledger, verified against the open-source CLI); cost ticks are 1e10 = $1.
+  Turns flagged `usageIsIncomplete` fall back to table pricing since the CLI
+  scrubs their cost as untrustworthy.
 - **Zed**: reads `%LOCALAPPDATA%\Zed\threads\threads.db` (override with
   `ZED_THREADS_DB`; macOS/Linux paths supported). Thread payloads are
   zstd-compressed JSON containing per-request `request_token_usage` (real
