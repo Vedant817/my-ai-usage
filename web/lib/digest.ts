@@ -1,7 +1,7 @@
 import { aggregateDay, getMeta, lastDay } from "./store";
 
 const PROVIDER_LABEL: Record<string, string> = {
-  codex: "Codex", claude: "Claude", grok: "Grok", opencode: "OpenCode", antigravity: "Antigravity",
+  codex: "Codex", claude: "Claude", grok: "Grok", opencode: "OpenCode", antigravity: "Antigravity", zed: "Zed",
 };
 
 function fmtUsd(n: number): string {
@@ -28,7 +28,7 @@ export async function buildDigestText(day: string): Promise<{ text: string; tota
   for (const b of Object.values(agg.byProvider)) total += b.costUsd;
   if (!total && Object.values(agg.byProvider).every((b) => b.totalTokens === 0)) return null;
   const parts: string[] = [];
-  for (const p of ["codex", "claude", "grok", "opencode", "antigravity"]) {
+  for (const p of ["codex", "claude", "grok", "opencode", "antigravity", "zed"]) {
     const b = agg.byProvider[p];
     if (!b || (b.costUsd === 0 && b.totalTokens === 0)) continue;
     const est = p === "antigravity" ? " est." : "";

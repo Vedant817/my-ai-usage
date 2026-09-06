@@ -11,7 +11,7 @@ export interface ModelRow {
   provider: string; model: string; totalTokens: number; costUsd: number; estimated?: boolean;
 }
 
-const PROVIDERS = ["codex", "claude", "grok", "opencode", "antigravity"] as const;
+const PROVIDERS = ["codex", "claude", "grok", "opencode", "antigravity", "zed"] as const;
 
 function dbFile(): string {
   const url = process.env.DATABASE_URL ?? "./data/usage.db";

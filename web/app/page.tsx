@@ -4,12 +4,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchSummary, readCache, writeCache, type Summary } from "../lib/api";
 import { fmtFull, fmtTokens, fmtUsd, shiftDay, shortDay, timeAgo, todayLocal } from "../lib/format";
 
-const ORDER = ["codex", "claude", "grok", "opencode", "antigravity"] as const;
+const ORDER = ["codex", "claude", "grok", "opencode", "antigravity", "zed"] as const;
 const LABEL: Record<string, string> = {
-  codex: "Codex", claude: "Claude", grok: "Grok", opencode: "OpenCode", antigravity: "Antigravity",
+  codex: "Codex", claude: "Claude", grok: "Grok", opencode: "OpenCode", antigravity: "Antigravity", zed: "Zed",
 };
 const DOT: Record<string, string> = {
-  codex: "#1c1917", claude: "#9a3412", grok: "#155e75", opencode: "#3f6212", antigravity: "#a8a29e",
+  codex: "#1c1917", claude: "#9a3412", grok: "#155e75", opencode: "#3f6212", antigravity: "#a8a29e", zed: "#475569",
 };
 
 function useDayParam(): [string, (d: string) => void] {

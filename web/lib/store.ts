@@ -16,7 +16,7 @@ export interface ModelRow {
   provider: string; model: string; totalTokens: number; costUsd: number; estimated?: boolean;
 }
 
-const PROVIDERS = ["codex", "claude", "grok", "opencode", "antigravity"] as const;
+const PROVIDERS = ["codex", "claude", "grok", "opencode", "antigravity", "zed"] as const;
 
 let _client: Client | null = null;
 
