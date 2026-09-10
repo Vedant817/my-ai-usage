@@ -25,6 +25,18 @@ function toMs(v: unknown, fallback: number): number {
   return fallback;
 }
 
+// Turns run in OpenCode can be backed by different accounts: Zen ("opencode"),
+// a Codex/ChatGPT subscription or API key ("openai"), etc. Keep every turn in
+// the opencode provider bucket (counted exactly once — these turns never appear
+// in ~/.codex/sessions), but label non-Zen rows with their backing provider so
+// subscription-backed usage is distinguishable in the model table.
+function modelLabel(model: unknown, providerID: unknown): string {
+  const m = String(model ?? "unknown");
+  const pid = String(providerID ?? "").trim().toLowerCase();
+  if (pid && pid !== "opencode" && !m.includes("/")) return `${pid}/${m}`;
+  return m;
+}
+
 export async function parseOpencode(
   state: DashState,
   windowStartMs: number,
@@ -82,7 +94,7 @@ export async function parseOpencode(
           try {
             const d = JSON.parse(r.data as unknown as string);
             const tokens = d.tokens ?? d.tokenUsage ?? {};
-            const model = String(d.modelID ?? d.model ?? "unknown");
+            const model = modelLabel(d.modelID ?? d.model, d.providerID ?? d.provider);
             const t = d.time?.completed ?? d.time?.created ?? r.timeCreated;
             pushRow(model, tokens, d.cost, toMs(t, Number(r.timeCreated)), String(r.id), String(r.sessionId));
           } catch { /* bad row */ }
@@ -112,7 +124,7 @@ export async function parseOpencode(
         const role = d.role ?? d.data?.role;
         if (role && role !== "assistant") continue;
         const tokens = d.tokens ?? d.data?.tokens ?? {};
-        const model = String(d.modelID ?? d.model ?? d.data?.modelID ?? "unknown");
+        const model = modelLabel(d.modelID ?? d.model ?? d.data?.modelID, d.data?.providerID);
         const t = d.time?.completed ?? d.time?.created ?? d.timeCreated ?? fs.statSync(f).mtimeMs;
         pushRow(model, tokens, d.cost ?? d.data?.cost, toMs(t, Date.now()),
           String(d.id ?? d.info?.id ?? f), String(d.sessionID ?? d.session_id ?? path.basename(path.dirname(f))));

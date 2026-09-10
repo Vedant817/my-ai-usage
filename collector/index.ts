@@ -99,12 +99,15 @@ function aggregate(records: UsageRecord[], pricer: Pricer, allowedDays: Set<stri
       const total = r.uncached + r.cached + r.cacheCreation + r.output;
       let cost = 0;
       let estimated = !!r.estimated;
+      // Model labels may carry a backing-provider prefix ("openai/gpt-5.6-sol")
+      // for display; price by the bare model id so labels stay cost-neutral.
+      const priceModel = r.model.includes("/") ? r.model.split("/").pop()! : r.model;
       if (estimated) {
-        cost = pricer.priceEstimated(r.model, r);
+        cost = pricer.priceEstimated(priceModel, r);
       } else if (r.reportedCost != null && r.reportedCost >= 0) {
         cost = r.reportedCost;
       } else {
-        const p = pricer.price(r.model, r, null);
+        const p = pricer.price(priceModel, r, null);
         cost = p.costUsd;
       }
       if (!byProvider[r.provider]) byProvider[r.provider] = { ...emptyBucket() };
