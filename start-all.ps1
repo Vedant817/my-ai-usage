@@ -1,4 +1,4 @@
-<# 
+<#
 .SYNOPSIS
     Starts the full AI Usage Dashboard stack locally.
     - Collector: runs once (dry-run) to verify config, then exits

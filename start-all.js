@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * start-all.js - Cross-platform launcher for the AI Usage Dashboard stack
- * 
+ *
  * Usage:
  *   node start-all.js              # start everything
  *   node start-all.js --no-collector
