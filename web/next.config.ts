@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // This repo keeps per-package lockfiles; pin tracing to the web app dir.
+  outputFileTracingRoot: __dirname,
   async headers() {
     return [
       {
