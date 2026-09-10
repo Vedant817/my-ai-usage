@@ -136,6 +136,28 @@ export default function Page() {
   const [data, setData] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+
+  // Theme is client-only (SSR has no window/localStorage); applied to <html>
+  // so all CSS vars switch, persisted across visits. Dark = high-contrast.
+  useEffect(() => {
+    let initial: "light" | "dark" = "light";
+    try {
+      const saved = localStorage.getItem("theme");
+      if (saved === "light" || saved === "dark") initial = saved;
+      else if (window.matchMedia("(prefers-color-scheme: dark)").matches) initial = "dark";
+    } catch { /* ignore */ }
+    setTheme(initial);
+    document.documentElement.dataset.theme = initial;
+  }, []);
+  const toggleTheme = useCallback(() => {
+    setTheme((t) => {
+      const next = t === "light" ? "dark" : "light";
+      try { localStorage.setItem("theme", next); } catch { /* ignore */ }
+      document.documentElement.dataset.theme = next;
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -262,7 +284,11 @@ export default function Page() {
     <main className="page wide">
       <header className="masthead">
         <div className="brand">Usage<small>AI CODING LEDGER</small></div>
-        <nav className="date-nav" aria-label="Day">
+        <div className="masthead-actions">
+          <button className="theme-btn" onClick={toggleTheme} aria-label={theme === "light" ? "Switch to high-contrast dark mode" : "Switch to light mode"}>
+            {theme === "light" ? "◐ Dark" : "◑ Light"}
+          </button>
+          <nav className="date-nav" aria-label="Day">
           <button onClick={() => setDay(shiftDay(day, -1))} aria-label="Previous day">←</button>
           <input
             type="date" value={day} max={todayLocal()}
@@ -271,6 +297,7 @@ export default function Page() {
           />
           <button onClick={() => setDay(shiftDay(day, 1))} disabled={day >= todayLocal()} aria-label="Next day">→</button>
         </nav>
+        </div>
       </header>
 
       {data?.isStale && data.lastPushAt ? (
@@ -316,12 +343,12 @@ export default function Page() {
               <div className="kpi-num">{fmtTokens(dayAgg.tokens)}</div>
               <div className="kpi-sub">{fmtFull(dayAgg.tokens)} total</div>
             </div>
-            <div className="kpi">
+            <div className="kpi kpi-range">
               <div className="kpi-label">{rangeLabel} cost</div>
               <div className="kpi-num">{fmtUsd(rangeAgg.cost)}</div>
               <div className="kpi-sub">across {range} days{sel ? ` · ${LABEL[sel]}` : ""}</div>
             </div>
-            <div className="kpi">
+            <div className="kpi kpi-range">
               <div className="kpi-label">{rangeLabel} tokens</div>
               <div className="kpi-num">{fmtTokens(rangeAgg.tokens)}</div>
               <div className="kpi-sub">{fmtFull(rangeAgg.tokens)} total</div>
@@ -391,6 +418,7 @@ export default function Page() {
             {models.length === 0 ? (
               <div className="empty">No model rows for this view.</div>
             ) : (
+              <div className="models-wrap">
               <table className="models">
                 <thead>
                   <tr><th>Model</th><th>Provider</th><th className="num">Cost</th><th className="num">Share</th><th className="num">Tokens</th></tr>
@@ -407,6 +435,7 @@ export default function Page() {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </section>
 

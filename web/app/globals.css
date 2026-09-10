@@ -12,13 +12,40 @@
   --warn-bg: #fffbeb;
   --warn-line: #e7d9b0;
   --warn-ink: #713f12;
+  --range: #db2777;
   --radius: 10px;
   --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-display: Georgia, "Times New Roman", serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+/* High-contrast dark theme (toggled via [data-theme="dark"] on <html>). */
+[data-theme="dark"] {
+  --bg: #161618;
+  --surface: #1e1e22;
+  --surface-soft: #2a2a30;
+  --ink: #ffffff;
+  --ink-soft: #ede9e4;
+  --muted: #cfc9c2;
+  --faint: #a8a29e;
+  --line: #343438;
+  --line-strong: #55555e;
+  --warn-bg: #231303;
+  --warn-line: #8a6d1f;
+  --warn-ink: #fde68a;
+  --range: #f9a8d4;
+}
+[data-theme="dark"] .dot, [data-theme="dark"] .cdot {
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+[data-theme="dark"] .section.dark {
+  background: #101014;
+  border-color: var(--line-strong);
+}
+
 * { box-sizing: border-box; }
+html { color-scheme: light; }
+[data-theme="dark"] { color-scheme: dark; }
 html, body { margin: 0; padding: 0; }
 body {
   background: var(--bg);
@@ -40,6 +67,12 @@ body {
 .brand { font-family: var(--font-display); font-size: 22px; letter-spacing: 0.01em; }
 .brand small { font-family: var(--font-body); font-size: 12px; color: var(--muted); margin-left: 8px; letter-spacing: 0.04em; }
 .date-nav { display: flex; gap: 6px; align-items: center; }
+.masthead-actions { display: flex; gap: 8px; align-items: center; }
+.theme-btn {
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-soft);
+  border-radius: 7px; padding: 4px 10px; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.theme-btn:hover { border-color: var(--ink-soft); color: var(--ink); }
 .date-nav button {
   border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-soft);
   border-radius: 7px; padding: 4px 10px; font-size: 13px; cursor: pointer;
@@ -82,6 +115,12 @@ body {
 .kpi-label { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kpi-num { font-size: 30px; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; margin-top: 4px; }
 .kpi-sub { font-size: 12px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
+/* Range tiles use a pinkish numeral to differentiate them from the day tiles. */
+.kpi-range .kpi-num { color: var(--range); }
+
+/* Compact single-row provider strip under the chart (no side column). */
+.pcards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 12px; }
+.models-wrap { max-height: 300px; overflow-y: auto; }
 
 .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
 .seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 8px; overflow: hidden; background: var(--surface); }
@@ -111,18 +150,18 @@ body {
 
 .pcards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-top: 14px; }
 .pcard {
-  display: grid; grid-template-columns: 10px 1fr; gap: 2px 8px; align-items: baseline; text-align: left;
+  display: grid; grid-template-columns: 10px 1fr; gap: 1px 8px; align-items: baseline; text-align: left;
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
-  padding: 12px 14px; font: inherit; color: inherit; cursor: pointer; min-width: 0;
+  padding: 8px 10px; font: inherit; color: inherit; cursor: pointer; min-width: 0;
 }
 .pcard:hover { border-color: var(--ink-soft); }
 .pcard.active { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
 .pcard .dot { width: 8px; height: 8px; border-radius: 50%; align-self: center; }
-.pcard-name { font-weight: 600; font-size: 14px; grid-column: 2; }
+.pcard-name { font-weight: 600; font-size: 13px; grid-column: 2; }
 .pcard-name .est { font-weight: 500; font-size: 11px; color: var(--muted); border: 1px solid var(--line-strong); border-radius: 20px; padding: 0 7px; margin-left: 6px; }
-.pcard-amt { grid-column: 2; font-weight: 650; font-size: 18px; font-variant-numeric: tabular-nums; }
-.pcard-sub { grid-column: 2; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.pcard .sharebar { grid-column: 1 / -1; margin-top: 6px; }
+.pcard-amt { grid-column: 2; font-weight: 650; font-size: 15px; font-variant-numeric: tabular-nums; }
+.pcard-sub { grid-column: 2; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pcard .sharebar { display: none; }
 
 .dot { width: 8px; height: 8px; border-radius: 50%; align-self: center; }
 .sharebar { grid-column: 1 / -1; height: 3px; background: var(--surface-soft); border-radius: 2px; overflow: hidden; margin-top: -2px; }
