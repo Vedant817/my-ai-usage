@@ -77,6 +77,23 @@ Schedule:
   (see `collector/schedule-windows.ps1`).
 - **Linux**: `collector/usage-dash.{service,timer}` (systemd, 15 min + boot).
 
+### Sync without cloning the repo
+
+The collector is published as `ai-usage-collector` (Bun or Node 22+, zero
+dependencies). Set four env vars once per machine, then sync with one command:
+
+~~~powershell
+$env:API_URL="https://<app>.vercel.app"
+$env:INGEST_TOKEN="<prod-ingest-token>"
+$env:DEVICE_ID="my-pc"; $env:DEVICE_LABEL="Desktop PC"
+bunx ai-usage-collector@latest --push --days 30
+~~~
+
+State lives in `~/.usage-dash/state.json`, so repeat runs stay incremental with
+no checkout. In OpenCode, `/sync-usage` runs the same push (`/sync-usage 90`
+backfills 90 days); the command is installed globally at
+`~/.config/opencode/commands/sync-usage.md`.
+
 ## 2. API + DB (Vercel + Turso — primary path)
 
 The API lives in the web app (`web/app/api/...`), so one Vercel project hosts
