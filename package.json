@@ -1,0 +1,15 @@
+{
+  "name": "usage-dash-root",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start:all": "node start-all.js",
+    "start:all:ps": "powershell -ExecutionPolicy Bypass -File start-all.ps1",
+    "collector:dry": "cd collector && bun run index.ts -- --days 30 --dry-run",
+    "collector:push": "cd collector && bun run index.ts -- --push",
+    "server:dev": "cd server && npm run dev",
+    "web:dev": "cd web && npm run dev",
+    "verify": "cd server && npx tsx verify.mjs"
+  }
+}
