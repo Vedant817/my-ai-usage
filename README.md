@@ -1,7 +1,7 @@
 # AI Usage Dashboard
 
 Personal dashboard for AI coding usage: tokens + USD cost per provider
-(`codex`, `claude`, `grok`, `opencode`, `antigravity`, `zed`).
+(`codex`, `claude`, `grok`, `opencode`, `antigravity`).
 
 One data source, two surfaces:
 
@@ -23,7 +23,7 @@ Light database: plain **SQLite** (`node:sqlite`, no native addons, no Postgres).
 ## Repo layout
 
 ```
-collector/  Bun+TS — index.ts, parsers/{claude,codex,grok,opencode,antigravity,zed}.ts,
+collector/  Bun+TS — index.ts, parsers/{claude,codex,grok,opencode,antigravity}.ts,
             pricing.ts, state.ts, types.ts, sqlite.ts, .env.example
 server/     Self-host alternative (Hono + SQLite) — index.ts, routes.ts, db.ts,
             digest.ts, Dockerfile, fly.toml, render.yaml, .env.example, verify.mjs
@@ -51,28 +51,22 @@ bun run index.ts -- --push --data-dir D:\usage-state   # state dir override
 
 - Scans files with mtime >= window start − 36h slack; incremental via
   `~/.usage-dash/state.json` (skip unchanged, resume grown files, per-file
-  record cache so repeat runs still push **full**-day totals).
+  record cache so repeat runs still push **full**-day totals). Widening the
+  requested range invalidates narrower caches before the backfill.
 - Exit code is always 0 (cron-friendly); one missing provider never fails the run.
 - Pricing: LiteLLM + models.dev tables, cached to disk 24h, last-good reused on
-  failure. Cost priority: `reportedCost` → table price → unpriced (tokens kept,
-  cost 0). Antigravity has no stored token counts: turns from `gen_metadata`
+  failure. Exact provider-neutral model IDs take priority, matching T3 Code's
+  base-tier LiteLLM lookup. Cost priority: `reportedCost` → table price →
+  unpriced (tokens kept, cost 0). Antigravity has no stored token counts: turns from `gen_metadata`
   rows × `ANTI_AVG_INPUT/OUTPUT/CACHED` env averages, priced via table, flagged
   estimated (`est.` in UI).
 - Token math: `total = uncached + cached + cacheCreation + output`; reasoning is
   a subset of output, never added.
 - **Grok**: `turn_completed` events carry that turn's own usage (per-prompt
   ledger, verified against the open-source CLI); cost ticks are 1e10 = $1.
-  Turns flagged `usageIsIncomplete` fall back to table pricing since the CLI
-  scrubs their cost as untrustworthy.
-- **Zed**: reads `%LOCALAPPDATA%\Zed\threads\threads.db` (override with
-  `ZED_THREADS_DB`; macOS/Linux paths supported). Thread payloads are
-  zstd-compressed JSON containing per-request `request_token_usage` (real
-  measured tokens, not estimates). Only threads routed through Zed-hosted
-  models (`model.provider == "zed.dev"`) are counted — threads via own API
-  keys, Copilot, or local models are skipped (no Zed billing impact). Usage is
-  cumulative per thread, so a whole thread is attributed to its creation day
-  (stable across runs). Costs use the rate table **×1.1** (Zed bills provider
-  list price +10%).
+  T3 Code-compatible semantics retain reported zero costs, deduplicate retried
+  prompt IDs, and allocate aggregate turn cost across models missing their own
+  ticks. Turns without a per-model split become one `grok` totals record.
 - Never reads `~/.claude/.credentials.json` / `~/.codex/auth.json`; provider API
   keys are not used anywhere.
 
@@ -98,10 +92,11 @@ npm run dev                  # local: API uses file:./data/usage.db
 | Endpoint | Auth | Behaviour |
 |---|---|---|
 | `POST /v1/ingest` | `Bearer $INGEST_TOKEN` | Upsert by `(deviceId, day)` → `{ok:true}` (rewritten to `/api/v1/ingest`) |
-| `GET /v1/summary?day=YYYY-MM-DD` | `Bearer $READ_TOKEN` | Latest day ≤ requested; `isStale` when `now-lastPushAt>30min` or day mismatch; includes 30-day `daily` + `models` |
+| `GET /v1/summary?day=YYYY-MM-DD` | `Bearer $READ_TOKEN` | Latest day ≤ requested; `isStale` when `now-lastPushAt>30min` or day mismatch; includes range `daily` (per-provider) + `models` |
 | `GET /v1/last-day` | either token | `{lastDay}` (collector backfill anchor) |
 | `GET /health` | none | `{ok:true}` |
 | `GET /api/cron/digest` | `Bearer $CRON_SECRET` | Telegram/email digest for the last day (Vercel Cron 09:00 + 21:00 IST) |
+| `GET /api/cron/sync` | `Bearer $CRON_SECRET` | Pull provider billing APIs into the DB (no PC job); digest also runs this first |
 
 Deploy:
 
@@ -162,6 +157,36 @@ Deploy: import `web/` in Vercel, set the two env vars. `vercel.json` included.
 - PWA: manifest `Usage`, standalone, service worker caches app shell +
   cache-first `GET /v1/summary`, so an offline open shows last data.
 
+## Account sync (no PC job, cross-device)
+
+The collector reads local files per device (run it on each device with a
+different `DEVICE_ID` — the server merges them). For providers with a billing
+API, the server can instead pull **account-level** usage itself on a schedule —
+no PC job, all devices covered automatically:
+
+| Provider | Account API? | Auth | Covers |
+|---|---|---|---|
+| OpenCode (Zen/Go) | ✅ Usage export CSV | service key `oc_sk_...` | per-request tokens + actual charged cost |
+| OpenAI | Enterprise only | Workspace Admin key | Codex Enterprise Analytics; **not** personal Plus/Pro history |
+| Anthropic | ✅ org Admin API (orgs only) | Admin key | API org usage — **not** Pro/Max subscription, not individuals |
+| xAI/Grok | ❌ console dashboard only | — | SuperGrok/subscription not exposed |
+| Google/Antigravity | complex (Cloud Billing, GCP only) | OAuth | not the free tier |
+
+T3 Code does not fetch historical Codex token totals from the ChatGPT account.
+It scans Codex, Claude, and Grok transcript files on every connected environment;
+its account endpoint reports quota-window percentages only. Therefore personal
+Codex Plus/Pro history cannot be made account-wide without reading each device.
+
+Setup (OpenCode): create a service-account key in the opencode console, set
+`OPENCODE_SERVICE_KEY` (+ optional `OPENCODE_CONSOLE_URL`) in Vercel env, and
+redeploy. The digest cron then syncs the last 30 days (idempotent upserts under
+device `cloud:opencode`; days are UTC). Manual trigger:
+`GET /api/cron/sync` with `Bearer $CRON_SECRET`.
+
+Cloud OpenCode rows are authoritative for each exported day, so matching local
+rows are not double-counted. You can still set `SKIP_PROVIDERS=opencode` in the
+collector `.env` to avoid unnecessary local parsing.
+
 ## 4. Android (no custom app)
 
 1. **PWA**: Chrome → open the site → ⋮ → **Add to Home screen**. Done — one tap,
@@ -180,11 +205,13 @@ server env vars and redeploy.
 
 - Collector `.env`: `API_URL` (= `https://<app>.vercel.app`, no path suffix —
   `/v1/*` is rewritten to the API routes), `INGEST_TOKEN, DEVICE_ID,
-  DEVICE_LABEL` (no `TELEGRAM_*` here).
+  DEVICE_LABEL, SKIP_PROVIDERS (optional, e.g. `opencode` when cloud-synced)`
+  (no `TELEGRAM_*` here).
 - Vercel env vars: `TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, INGEST_TOKEN,
   READ_TOKEN, CRON_SECRET, NEXT_PUBLIC_API_URL, NEXT_PUBLIC_READ_TOKEN`
   (+ `TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, RESEND_API_KEY (optional),
-  DIGEST_EMAIL_TO (optional), ALERT_THRESHOLD_USD (default 20)`) — see
+  DIGEST_EMAIL_TO (optional), ALERT_THRESHOLD_USD (default 20),
+  OPENCODE_SERVICE_KEY + OPENCODE_CONSOLE_URL (optional, account sync)`) — see
   `web/.env.example`.
 - Self-host `server/.env` (only if using Fly/Render instead): `DATABASE_URL,
   INGEST_TOKEN, READ_TOKEN, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
@@ -199,9 +226,6 @@ server env vars and redeploy.
 - [x] `verify.mjs`: 13/13 (auth, upsert-replace, fallback, no absolute paths in DB).
 - [x] DB/file secret scan: no prompts, tokens, or credential paths stored.
 - [x] Antigravity rows flagged estimated end-to-end (parser → API → UI badge).
-- [x] Zed parser verified: real `threads.db` parses (2 local threads correctly
-  skipped as Copilot-routed, 0 `zed.dev` records); synthetic fixture proves
-  extraction of exact tokens, cumulative fallback, and the ×1.1 cost markup.
 - [x] `next build` clean; `/`, `/manifest.webmanifest`, `/sw.js` all serve 200.
 - [ ] Telegram message received twice daily — needs real bot token (code path
   exercised with `--once`, delivery pending credentials).
