@@ -4,7 +4,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { PROVIDERS, dayOffset, emptyBucket, parseDay, type DayPayload, type IngestBody, type UsageRecord } from "./types.js";
+import { PROVIDERS, dayOffset, emptyBucket, parseDay, type DayPayload, type IngestBody, type Provider, type UsageRecord } from "./types.js";
 import { loadState, saveState } from "./state.js";
 import { Pricer } from "./pricing.js";
 import { parseClaude } from "./parsers/claude.js";
@@ -93,7 +93,7 @@ function aggregate(records: UsageRecord[], pricer: Pricer, allowedDays: Set<stri
   for (const day of [...byDay.keys()].sort()) {
     const list = byDay.get(day)!;
     const byProvider: DayPayload["byProvider"] = {};
-    const modelMap = new Map<string, { provider: string; model: string; totalTokens: number; costUsd: number; estimated: boolean }>();
+    const modelMap = new Map<string, { provider: Provider; model: string; totalTokens: number; costUsd: number; estimated: boolean }>();
     const sessByProv = new Map<string, Set<string>>();
     for (const r of list) {
       const total = r.uncached + r.cached + r.cacheCreation + r.output;
@@ -220,7 +220,7 @@ async function main(): Promise<void> {
 
   // Per-provider log (counts only, no paths/prompts).
   for (const r of results) {
-    console.log(JSON.stringify({ provider: r.stats.provider, ...r.stats }));
+    console.log(JSON.stringify({ ...r.stats }));
   }
   console.log(JSON.stringify({
     days: days.length, range: days.length ? `${days[0].day}..${days[days.length - 1].day}` : "empty",

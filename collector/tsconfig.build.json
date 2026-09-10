@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "rootDir": ".",
+    "outDir": "./dist",
+    "noEmit": false,
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["./index.ts", "./parsers/**/*.ts", "./pricing.ts", "./state.ts", "./types.ts", "./sqlite.ts", "./bun-sqlite.d.ts"],
+  "exclude": ["node_modules", "dist"]
+}

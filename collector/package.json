@@ -1,11 +1,28 @@
 {
-  "name": "usage-dash-collector",
+  "name": "ai-usage-collector",
   "version": "1.0.0",
-  "private": true,
+  "description": "Totals-only usage collector for AI coding tools (Codex, Claude, Grok, OpenCode, Antigravity). Reads local session files, uploads per-day token/cost totals. Prompts and file contents never leave the PC.",
   "type": "module",
+  "bin": {
+    "ai-usage-collector": "./bin/ai-usage-collector.js"
+  },
+  "files": [
+    "dist/",
+    "bin/"
+  ],
   "scripts": {
     "collect": "bun run index.ts",
     "dry": "bun run index.ts -- --days 30 --dry-run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run build"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
   }
 }
