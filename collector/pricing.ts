@@ -167,6 +167,12 @@ export class Pricer {
     if (reported != null && Number.isFinite(reported) && reported >= 0) {
       return { costUsd: reported, source: "reported" };
     }
+    // OpenCode Zen free-tier models (`*-free`) are $0 by definition. Without
+    // this they substring-match paid rates (e.g. `deepseek-v4-flash-free`
+    // matching `deepseek-v4-flash`) and invent costs. Tokens are still kept.
+    if (norm(model).endsWith("-free")) {
+      return { costUsd: 0, source: "priced" };
+    }
     const r = this.findRate(model);
     if (!r) {
       const d = FALLBACK.find(([k]) => k === "default")![1];
