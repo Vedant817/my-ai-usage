@@ -1,6 +1,6 @@
 {
   "name": "ai-usage-collector",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Totals-only usage collector for AI coding tools (Codex, Claude, Grok, OpenCode, Antigravity). Reads local session files, uploads per-day token/cost totals. Prompts and file contents never leave the PC.",
   "type": "module",
   "bin": {
