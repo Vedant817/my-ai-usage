@@ -214,14 +214,20 @@ export default function Page() {
   const rangeByProvider = useMemo(() => {
     const totals: Record<string, { tokens: number; cost: number }> = {};
     for (const p of ORDER) totals[p] = { tokens: 0, cost: 0 };
-    for (const row of data?.daily ?? []) {
-      for (const p of ORDER) {
-        totals[p].tokens += row.byProvider[p]?.totalTokens ?? 0;
-        totals[p].cost += row.byProvider[p]?.costUsd ?? 0;
+    if (data && data.daily.length) {
+      const byDay = new Map(data.daily.map((d) => [d.day, d]));
+      const endDay = data.daily[data.daily.length - 1].day;
+      for (let i = range - 1; i >= 0; i--) {
+        const row = byDay.get(shiftDayStr(endDay, -i));
+        if (!row) continue;
+        for (const p of ORDER) {
+          totals[p].tokens += row.byProvider[p]?.totalTokens ?? 0;
+          totals[p].cost += row.byProvider[p]?.costUsd ?? 0;
+        }
       }
     }
     return totals;
-  }, [data]);
+  }, [data, range]);
 
   // Models follow the selected range (like cards/chart), not just the day.
   const models = useMemo(() => {
@@ -405,7 +411,7 @@ export default function Page() {
           </section>
 
           <footer className="footer">
-            <span>Pricing: LiteLLM + models.dev tables (cached 24h){data.models.some((m) => m.estimated) ? " · * estimated" : ""}</span>
+            <span>Pricing: LiteLLM + models.dev tables (cached 24h){models.some((m) => m.estimated) ? " · * estimated" : ""}</span>
             <span>Last push {data.lastPushAt ? timeAgo(data.lastPushAt) : "never"}</span>
           </footer>
         </>

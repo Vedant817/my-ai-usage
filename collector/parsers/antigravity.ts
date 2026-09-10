@@ -29,11 +29,14 @@ function listDbs(): string[] {
 
 function extractModelsFromBlob(blob: Buffer | Uint8Array | string): string[] {
   // gen_metadata BLOBs embed model names as text; scan for known families.
+  // Family list is intentionally broad (not just gemini/claude/gpt/grok) so a
+  // newly adopted model still attributes to its own name instead of collapsing
+  // into the gemini-2.5-flash fallback. Unknown shapes stay estimated anyway.
   let text: string;
   if (typeof blob === "string") text = blob;
   else text = Buffer.from(blob as Uint8Array).toString("utf8");
   const found = new Set<string>();
-  const re = /(gemini-[\w.\-]+|claude-[\w.\-]+|gpt-[\w.\-]+|grok-[\w.\-]+)/gi;
+  const re = /(gemini-[\w.\-]+|claude-[\w.\-]+|gpt-[\w.\-]+|grok-[\w.\-]+|deepseek-[\w.\-]+|kimi-[\w.\-]+|qwen-[\w.\-]+|glm-[\w.\-]+|minimax-[\w.\-]+|mistral-[\w.\-]+|mixtral-[\w.\-]+|llama-[\w.\-]+|Muse-[\w.\-]+|codestral-[\w.\-]+)/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) != null) {
     found.add(m[1].toLowerCase());
