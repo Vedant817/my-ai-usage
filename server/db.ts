@@ -11,7 +11,7 @@ export interface ModelRow {
   provider: string; model: string; totalTokens: number; costUsd: number; estimated?: boolean;
 }
 
-const PROVIDERS = ["codex", "claude", "grok", "opencode", "antigravity", "zed"] as const;
+const PROVIDERS = ["codex", "claude", "grok", "opencode", "antigravity"] as const;
 
 function dbFile(): string {
   const url = process.env.DATABASE_URL ?? "./data/usage.db";
@@ -150,25 +150,44 @@ export function latestDayAtOrBefore(day: string): string | null {
   return r?.d ?? null;
 }
 
-export function dailySeries(days = 30, endDay?: string): Array<{ day: string; totalTokens: number; costUsd: number }> {
+export interface DailyPoint {
+  day: string;
+  totalTokens: number;
+  costUsd: number;
+  byProvider: Record<string, { totalTokens: number; costUsd: number }>;
+}
+
+export function dailySeries(days = 30, endDay?: string): DailyPoint[] {
   const end = endDay ?? lastDay() ?? new Date().toLocaleDateString("en-CA");
   const rows = db().prepare(`SELECT day, by_provider FROM pushes WHERE day <= ? ORDER BY day DESC LIMIT ?`).all(end, days * 4) as Array<{ day: string; by_provider: string }>;
-  const map = new Map<string, { totalTokens: number; costUsd: number }>();
+  const map = new Map<string, DailyPoint>();
   for (const r of rows) {
     try {
       const bp = JSON.parse(r.by_provider) as Record<string, ProviderBucket>;
-      let t = 0, c = 0;
-      for (const p of PROVIDERS) {
-        t += Number(bp?.[p]?.totalTokens) || 0;
-        c += Number(bp?.[p]?.costUsd) || 0;
+      let acc = map.get(r.day);
+      if (!acc) {
+        const byProvider: DailyPoint["byProvider"] = {};
+        for (const p of PROVIDERS) byProvider[p] = { totalTokens: 0, costUsd: 0 };
+        acc = { day: r.day, totalTokens: 0, costUsd: 0, byProvider };
+        map.set(r.day, acc);
       }
-      const acc = map.get(r.day) ?? { totalTokens: 0, costUsd: 0 };
-      acc.totalTokens += t; acc.costUsd += c;
-      map.set(r.day, acc);
+      for (const p of PROVIDERS) {
+        const t = Number(bp?.[p]?.totalTokens) || 0;
+        const c = Number(bp?.[p]?.costUsd) || 0;
+        acc.totalTokens += t; acc.costUsd += c;
+        acc.byProvider[p].totalTokens += t;
+        acc.byProvider[p].costUsd += c;
+      }
     } catch { /* ignore */ }
   }
-  return [...map.entries()]
-    .sort(([a], [b]) => (a < b ? -1 : 1))
+  return [...map.values()]
+    .sort((a, b) => (a.day < b.day ? -1 : 1))
     .slice(-days)
-    .map(([day, v]) => ({ day, totalTokens: v.totalTokens, costUsd: Math.round(v.costUsd * 10000) / 10000 }));
+    .map((d) => ({
+      ...d,
+      costUsd: Math.round(d.costUsd * 10000) / 10000,
+      byProvider: Object.fromEntries(
+        Object.entries(d.byProvider).map(([p, v]) => [p, { ...v, costUsd: Math.round(v.costUsd * 10000) / 10000 }]),
+      ),
+    }));
 }

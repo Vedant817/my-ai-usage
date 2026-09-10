@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { aggregateDay, dailySeries, getMeta, lastDay, latestDayAtOrBefore, upsertDay } from "./db.js";
+import { aggregateDay, dailySeries, emptyProviders, getMeta, lastDay, latestDayAtOrBefore, upsertDay } from "./db.js";
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -64,13 +64,22 @@ export function createApp(): Hono {
     const q = c.req.query("day");
     const today = new Date().toLocaleDateString("en-CA");
     const requestedDay = DAY_RE.test(q ?? "") ? (q as string) : today;
+    const daysRaw = Number(c.req.query("days") ?? 30);
+    const rangeDays = Number.isFinite(daysRaw) ? Math.min(90, Math.max(1, Math.floor(daysRaw))) : 30;
+    const coverage = {
+      codex: { mode: "device", note: "This device only; Codex subscriptions have no account usage API." },
+      claude: { mode: "device", note: "This device only; Claude subscriptions have no account usage API." },
+      grok: { mode: "device", note: "This device only; Grok subscriptions have no account usage API." },
+      opencode: { mode: "device", note: "This device only. Use the hosted account sync for account-wide usage." },
+      antigravity: { mode: "device", note: "This device only; Antigravity exposes no historical account usage API." },
+    } as const;
     const resolved = latestDayAtOrBefore(requestedDay);
     if (!resolved) {
       return c.json({
         requestedDay, day: requestedDay, isStale: true,
         lastPushAt: getMeta("lastPushAt") ?? null, readAt: new Date().toISOString(),
         totalTokens: 0, costUsd: 0, sessions: 0,
-        byProvider: {}, models: [], daily: [],
+        byProvider: emptyProviders(), models: [], rangeDays, daily: [], coverage,
       });
     }
     const agg = aggregateDay(resolved);
@@ -85,7 +94,7 @@ export function createApp(): Hono {
       lastPushAt, readAt: new Date().toISOString(),
       totalTokens, costUsd: Math.round(costUsd * 10000) / 10000, sessions,
       byProvider: agg.byProvider, models: agg.models,
-      daily: dailySeries(30, resolved),
+      rangeDays, daily: dailySeries(rangeDays, resolved), coverage,
     });
   });
 

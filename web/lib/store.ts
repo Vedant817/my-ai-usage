@@ -16,12 +16,16 @@ export interface ModelRow {
   provider: string; model: string; totalTokens: number; costUsd: number; estimated?: boolean;
 }
 
-const PROVIDERS = ["codex", "claude", "grok", "opencode", "antigravity", "zed"] as const;
+const PROVIDERS = ["codex", "claude", "grok", "opencode", "antigravity"] as const;
 
 let _client: Client | null = null;
 
 function dbUrl(): string {
-  return process.env.TURSO_DATABASE_URL ?? "file:./data/usage.db";
+  const raw = (process.env.TURSO_DATABASE_URL ?? "file:./data/usage.db").trim();
+  // Tolerate bare filesystem paths ("./data/usage.db", "C:\data\u.db"):
+  // libsql requires the file: scheme for local databases.
+  if (raw === ":memory:" || raw.includes("://") || raw.startsWith("file:")) return raw;
+  return `file:${raw}`;
 }
 
 function ensureLocalDir(url: string): void {
@@ -125,13 +129,15 @@ export interface DayAggregate {
 }
 
 export async function aggregateDay(day: string): Promise<DayAggregate> {
-  const r = await client().execute({ sql: `SELECT by_provider, models FROM pushes WHERE day=?`, args: [day] });
+  const r = await client().execute({ sql: `SELECT device_id, by_provider, models FROM pushes WHERE day=?`, args: [day] });
+  const hasOpencodeCloud = r.rows.some((row) => row.device_id === "cloud:opencode");
   const byProvider = emptyProviders();
   const modelMap = new Map<string, ModelRow>();
   for (const row of r.rows) {
     try {
       const bp = JSON.parse(row.by_provider as string) as Record<string, ProviderBucket>;
       for (const p of PROVIDERS) {
+        if (p === "opencode" && hasOpencodeCloud && row.device_id !== "cloud:opencode") continue;
         const b = bp?.[p];
         if (!b) continue;
         for (const k of Object.keys(byProvider[p]) as Array<keyof ProviderBucket>) {
@@ -142,6 +148,7 @@ export async function aggregateDay(day: string): Promise<DayAggregate> {
     try {
       const ms = JSON.parse(row.models as string) as ModelRow[];
       for (const m of ms) {
+        if (m.provider === "opencode" && hasOpencodeCloud && row.device_id !== "cloud:opencode") continue;
         const key = `${m.provider}\0${m.model}`;
         if (!modelMap.has(key)) modelMap.set(key, { ...m, totalTokens: 0, costUsd: 0 });
         const acc = modelMap.get(key)!;
@@ -163,25 +170,48 @@ export async function latestDayAtOrBefore(day: string): Promise<string | null> {
   return (r.rows[0]?.d as string) ?? null;
 }
 
-export async function dailySeries(days = 30, endDay?: string): Promise<Array<{ day: string; totalTokens: number; costUsd: number }>> {
+export interface DailyPoint {
+  day: string;
+  totalTokens: number;
+  costUsd: number;
+  byProvider: Record<string, { totalTokens: number; costUsd: number }>;
+}
+
+export async function dailySeries(days = 30, endDay?: string): Promise<DailyPoint[]> {
   const end = endDay ?? (await lastDay()) ?? new Date().toLocaleDateString("en-CA");
-  const r = await client().execute({ sql: `SELECT day, by_provider FROM pushes WHERE day <= ? ORDER BY day DESC LIMIT ?`, args: [end, days * 4] });
-  const map = new Map<string, { totalTokens: number; costUsd: number }>();
+  const r = await client().execute({ sql: `SELECT device_id, day, by_provider FROM pushes WHERE day <= ? ORDER BY day DESC LIMIT ?`, args: [end, days * 4] });
+  const opencodeCloudDays = new Set(
+    r.rows.filter((row) => row.device_id === "cloud:opencode").map((row) => row.day as string),
+  );
+  const map = new Map<string, DailyPoint>();
   for (const row of r.rows) {
     try {
       const bp = JSON.parse(row.by_provider as string) as Record<string, ProviderBucket>;
-      let t = 0, c = 0;
-      for (const p of PROVIDERS) {
-        t += Number(bp?.[p]?.totalTokens) || 0;
-        c += Number(bp?.[p]?.costUsd) || 0;
+      let acc = map.get(row.day as string);
+      if (!acc) {
+        const byProvider: DailyPoint["byProvider"] = {};
+        for (const p of PROVIDERS) byProvider[p] = { totalTokens: 0, costUsd: 0 };
+        acc = { day: row.day as string, totalTokens: 0, costUsd: 0, byProvider };
+        map.set(row.day as string, acc);
       }
-      const acc = map.get(row.day as string) ?? { totalTokens: 0, costUsd: 0 };
-      acc.totalTokens += t; acc.costUsd += c;
-      map.set(row.day as string, acc);
+      for (const p of PROVIDERS) {
+        if (p === "opencode" && opencodeCloudDays.has(row.day as string) && row.device_id !== "cloud:opencode") continue;
+        const t = Number(bp?.[p]?.totalTokens) || 0;
+        const c = Number(bp?.[p]?.costUsd) || 0;
+        acc.totalTokens += t; acc.costUsd += c;
+        acc.byProvider[p].totalTokens += t;
+        acc.byProvider[p].costUsd += c;
+      }
     } catch { /* ignore */ }
   }
-  return [...map.entries()]
-    .sort(([a], [b]) => (a < b ? -1 : 1))
+  return [...map.values()]
+    .sort((a, b) => (a.day < b.day ? -1 : 1))
     .slice(-days)
-    .map(([day, v]) => ({ day, totalTokens: v.totalTokens, costUsd: Math.round(v.costUsd * 10000) / 10000 }));
+    .map((d) => ({
+      ...d,
+      costUsd: Math.round(d.costUsd * 10000) / 10000,
+      byProvider: Object.fromEntries(
+        Object.entries(d.byProvider).map(([p, v]) => [p, { ...v, costUsd: Math.round(v.costUsd * 10000) / 10000 }]),
+      ),
+    }));
 }

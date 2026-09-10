@@ -1,7 +1,8 @@
 import { aggregateDay, getMeta, lastDay } from "./db.js";
+import { loadEnv } from "./env.js";
 
 const PROVIDER_LABEL: Record<string, string> = {
-  codex: "Codex", claude: "Claude", grok: "Grok", opencode: "OpenCode", antigravity: "Antigravity", zed: "Zed",
+  codex: "Codex", claude: "Claude", grok: "Grok", opencode: "OpenCode", antigravity: "Antigravity",
 };
 
 function fmtUsd(n: number): string {
@@ -28,7 +29,7 @@ export function buildDigestText(day: string): string | null {
   for (const b of Object.values(agg.byProvider)) total += b.costUsd;
   if (!total && Object.values(agg.byProvider).every((b) => b.totalTokens === 0)) return null;
   const parts: string[] = [];
-  for (const p of ["codex", "claude", "grok", "opencode", "antigravity", "zed"]) {
+  for (const p of ["codex", "claude", "grok", "opencode", "antigravity"]) {
     const b = agg.byProvider[p];
     if (!b || (b.costUsd === 0 && b.totalTokens === 0)) continue;
     const est = p === "antigravity" ? " est." : "";
@@ -122,6 +123,7 @@ export function maybeStartDigestLoop(): void {
 
 // CLI: node digest.ts --once [--alert]
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("digest.ts")) {
+  loadEnv();
   const alert = process.argv.includes("--alert");
   runDigestOnce(alert ? "alert" : "manual").then(() => process.exit(0));
 }

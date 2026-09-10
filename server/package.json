@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --watch index.ts",
+    "dev": "tsx watch index.ts",
     "start": "node index.ts",
     "digest:once": "node digest.ts --once",
     "typecheck": "tsc --noEmit"

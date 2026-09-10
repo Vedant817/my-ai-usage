@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { aggregateDay, dailySeries, getMeta, init, latestDayAtOrBefore } from "../../../../lib/store";
+import { aggregateDay, dailySeries, emptyProviders, getMeta, init, latestDayAtOrBefore } from "../../../../lib/store";
 
 export const dynamic = "force-dynamic";
 
@@ -17,14 +17,26 @@ export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("day");
   const today = new Date().toLocaleDateString("en-CA");
   const requestedDay = q && DAY_RE.test(q) ? q : today;
+  const daysRaw = Number(req.nextUrl.searchParams.get("days") ?? 30);
+  const rangeDays = Number.isFinite(daysRaw) ? Math.min(90, Math.max(1, Math.floor(daysRaw))) : 30;
   await init();
+  const opencodeAccount = Boolean(process.env.OPENCODE_SERVICE_KEY?.trim());
+  const coverage = {
+    codex: { mode: "device", note: "This device only; Codex subscriptions have no account usage API." },
+    claude: { mode: "device", note: "This device only; Claude subscriptions have no account usage API." },
+    grok: { mode: "device", note: "This device only; Grok subscriptions have no account usage API." },
+    opencode: opencodeAccount
+      ? { mode: "account", note: "Account export covers all devices for the last 30 days.", maxDays: 30, lastSyncAt: await getMeta("sync:opencode:lastAt") }
+      : { mode: "device", note: "This device only. Configure OPENCODE_SERVICE_KEY for account-wide usage." },
+    antigravity: { mode: "device", note: "This device only; Antigravity exposes no historical account usage API." },
+  } as const;
   const resolved = await latestDayAtOrBefore(requestedDay);
   if (!resolved) {
     return NextResponse.json({
       requestedDay, day: requestedDay, isStale: true,
       lastPushAt: (await getMeta("lastPushAt")) ?? null, readAt: new Date().toISOString(),
       totalTokens: 0, costUsd: 0, sessions: 0,
-      byProvider: {}, models: [], daily: [],
+      byProvider: emptyProviders(), models: [], rangeDays, daily: [], coverage,
     });
   }
   const agg = await aggregateDay(resolved);
@@ -39,6 +51,6 @@ export async function GET(req: NextRequest) {
     lastPushAt, readAt: new Date().toISOString(),
     totalTokens, costUsd: Math.round(costUsd * 10000) / 10000, sessions,
     byProvider: agg.byProvider, models: agg.models,
-    daily: await dailySeries(30, resolved),
+    rangeDays, daily: await dailySeries(rangeDays, resolved), coverage,
   });
 }
