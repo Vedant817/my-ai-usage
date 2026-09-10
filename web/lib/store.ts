@@ -175,15 +175,17 @@ export interface DailyPoint {
   totalTokens: number;
   costUsd: number;
   byProvider: Record<string, { totalTokens: number; costUsd: number }>;
+  models: ModelRow[];
 }
 
 export async function dailySeries(days = 30, endDay?: string): Promise<DailyPoint[]> {
   const end = endDay ?? (await lastDay()) ?? new Date().toLocaleDateString("en-CA");
-  const r = await client().execute({ sql: `SELECT device_id, day, by_provider FROM pushes WHERE day <= ? ORDER BY day DESC LIMIT ?`, args: [end, days * 4] });
+  const r = await client().execute({ sql: `SELECT device_id, day, by_provider, models FROM pushes WHERE day <= ? ORDER BY day DESC LIMIT ?`, args: [end, days * 4] });
   const opencodeCloudDays = new Set(
     r.rows.filter((row) => row.device_id === "cloud:opencode").map((row) => row.day as string),
   );
   const map = new Map<string, DailyPoint>();
+  const modelMaps = new Map<string, Map<string, ModelRow>>();
   for (const row of r.rows) {
     try {
       const bp = JSON.parse(row.by_provider as string) as Record<string, ProviderBucket>;
@@ -191,17 +193,32 @@ export async function dailySeries(days = 30, endDay?: string): Promise<DailyPoin
       if (!acc) {
         const byProvider: DailyPoint["byProvider"] = {};
         for (const p of PROVIDERS) byProvider[p] = { totalTokens: 0, costUsd: 0 };
-        acc = { day: row.day as string, totalTokens: 0, costUsd: 0, byProvider };
+        acc = { day: row.day as string, totalTokens: 0, costUsd: 0, byProvider, models: [] };
         map.set(row.day as string, acc);
+        modelMaps.set(row.day as string, new Map());
       }
+      const cloudDay = opencodeCloudDays.has(row.day as string);
       for (const p of PROVIDERS) {
-        if (p === "opencode" && opencodeCloudDays.has(row.day as string) && row.device_id !== "cloud:opencode") continue;
+        if (p === "opencode" && cloudDay && row.device_id !== "cloud:opencode") continue;
         const t = Number(bp?.[p]?.totalTokens) || 0;
         const c = Number(bp?.[p]?.costUsd) || 0;
         acc.totalTokens += t; acc.costUsd += c;
         acc.byProvider[p].totalTokens += t;
         acc.byProvider[p].costUsd += c;
       }
+      try {
+        const ms = JSON.parse(row.models as string) as ModelRow[];
+        const mm = modelMaps.get(row.day as string)!;
+        for (const m of ms) {
+          if (m.provider === "opencode" && cloudDay && row.device_id !== "cloud:opencode") continue;
+          const key = `${m.provider}\0${m.model}`;
+          if (!mm.has(key)) mm.set(key, { provider: m.provider, model: m.model, totalTokens: 0, costUsd: 0 });
+          const a = mm.get(key)!;
+          a.totalTokens += Number(m.totalTokens) || 0;
+          a.costUsd += Number(m.costUsd) || 0;
+          a.estimated = a.estimated || (m as any).estimated;
+        }
+      } catch { /* ignore bad models */ }
     } catch { /* ignore */ }
   }
   return [...map.values()]
@@ -213,5 +230,8 @@ export async function dailySeries(days = 30, endDay?: string): Promise<DailyPoin
       byProvider: Object.fromEntries(
         Object.entries(d.byProvider).map(([p, v]) => [p, { ...v, costUsd: Math.round(v.costUsd * 10000) / 10000 }]),
       ),
+      models: [...(modelMaps.get(d.day)?.values() ?? [])]
+        .map((m) => ({ ...m, costUsd: Math.round(m.costUsd * 10000) / 10000 }))
+        .sort((a, b) => b.costUsd - a.costUsd || b.totalTokens - a.totalTokens),
     }));
 }

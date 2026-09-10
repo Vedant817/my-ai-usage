@@ -223,11 +223,30 @@ export default function Page() {
     return totals;
   }, [data]);
 
+  // Models follow the selected range (like cards/chart), not just the day.
   const models = useMemo(() => {
-    if (!data) return [];
-    const list = sel ? data.models.filter((m) => m.provider === sel) : data.models;
-    return list.slice(0, 25);
-  }, [data, sel]);
+    if (!data || data.daily.length === 0) return [];
+    const byDay = new Map(data.daily.map((d) => [d.day, d]));
+    const endDay = data.daily[data.daily.length - 1].day;
+    const acc = new Map<string, { provider: string; model: string; totalTokens: number; costUsd: number; estimated?: boolean }>();
+    for (let i = range - 1; i >= 0; i--) {
+      const row = byDay.get(shiftDayStr(endDay, -i));
+      if (!row) continue;
+      for (const m of row.models ?? []) {
+        if (sel && m.provider !== sel) continue;
+        const key = `${m.provider}\0${m.model}`;
+        if (!acc.has(key)) acc.set(key, { provider: m.provider, model: m.model, totalTokens: 0, costUsd: 0 });
+        const a = acc.get(key)!;
+        a.totalTokens += m.totalTokens;
+        a.costUsd += m.costUsd;
+        a.estimated = a.estimated || m.estimated;
+      }
+    }
+    return [...acc.values()]
+      .map((m) => ({ ...m, costUsd: Math.round(m.costUsd * 10000) / 10000 }))
+      .sort((a, b) => b.costUsd - a.costUsd || b.totalTokens - a.totalTokens)
+      .slice(0, 25);
+  }, [data, range, sel]);
 
   const showSkeleton = loading && !data;
   const rangeLabel = `LAST ${range}D`;
@@ -362,7 +381,7 @@ export default function Page() {
           </section>
 
           <section className="section" aria-label="Models">
-            <h2>Models · {shortDay(data.day)}{sel ? ` · ${LABEL[sel]}` : ""}</h2>
+            <h2>Models · last {range}D{sel ? ` · ${LABEL[sel]}` : ""}</h2>
             {models.length === 0 ? (
               <div className="empty">No model rows for this view.</div>
             ) : (
@@ -376,7 +395,7 @@ export default function Page() {
                       <td className="mname">{m.model}{m.estimated ? " *" : ""}</td>
                       <td className="mprov">{LABEL[m.provider] ?? m.provider}</td>
                       <td className="num">{fmtUsd(m.costUsd)}</td>
-                      <td className="num">{dayAgg.cost > 0 ? `${((m.costUsd / dayAgg.cost) * 100).toFixed(1)}%` : "—"}</td>
+                      <td className="num">{rangeAgg.cost > 0 ? `${((m.costUsd / rangeAgg.cost) * 100).toFixed(1)}%` : "—"}</td>
                       <td className="num">{fmtTokens(m.totalTokens)}</td>
                     </tr>
                   ))}

@@ -88,6 +88,7 @@ r = await app.request("/v1/summary?day=2026-09-04&days=60", { headers: { Authori
 const s4 = await r.json();
 check("range days echo", s4.rangeDays === 60);
 check("daily per-provider", s4.daily.length === 1 && s4.daily[0].byProvider?.codex?.totalTokens === 999);
+check("daily models", s4.daily[0].models?.some((m) => m.provider === "codex" && m.model === "gpt-5" && m.totalTokens === 600));
 r = await app.request("/v1/summary?day=2026-09-04&days=9999", { headers: { Authorization: "Bearer test-read" } });
 check("range days clamped", (await r.json()).rangeDays === 90);
 

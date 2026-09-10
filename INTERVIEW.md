@@ -133,7 +133,8 @@ so collector-only pushes don't fail/trigger deploys.
   no account API exists; only Enterprise analytics escapes this.
 - Antigravity numbers are estimates; free-tier models show tokens at $0 and
   sort to the bottom of the cost-ordered model table.
-- Model table is day-scoped; provider cards and chart follow the selected range.
+- Model table aggregates across the selected range (daily points carry their
+  own model breakdowns, merged range-wide like the cards).
 
 ## 7. Likely interviewer questions
 
@@ -182,8 +183,8 @@ an npm package with a bin entry; `bunx` fetches and runs it. State lives in
 command is just a checked-in prompt that invokes the same package.
 
 **Q: What would you build next?**
-A: Per-day model history (currently day-scoped snapshot only); token-sorted
-model view so $0 free-tier giants like the 443M DeepSeek rows surface;
+A: Token-sorted model view so $0 free-tier giants like the 443M DeepSeek rows
+surface above paid rows;
 Codex Enterprise analytics integration for true account-wide Codex; alerting
 on week-over-week spend deltas.
 

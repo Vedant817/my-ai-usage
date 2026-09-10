@@ -12,6 +12,7 @@ export interface DailyPoint {
   totalTokens: number;
   costUsd: number;
   byProvider: Record<string, { totalTokens: number; costUsd: number }>;
+  models: ModelRow[];
 }
 
 export interface Summary {
