@@ -11,6 +11,8 @@ export interface FileCacheEntry {
 export interface DashState {
   v: 3;
   lastPushDay: string | null;
+  /** Earliest day included when the current file caches were built. */
+  cacheSinceDay?: string;
   fileCache: Record<string, FileCacheEntry>;
   /** Per-file raw records already read. Lets incremental scans skip I/O while
    *  still pushing FULL-day totals (server upserts replace the whole day). */

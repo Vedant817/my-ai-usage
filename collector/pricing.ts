@@ -144,12 +144,16 @@ export class Pricer {
   findRate(model: string): Rate | null {
     const n = norm(model || "");
     if (!n) return null;
-    // longest-substring match wins
+    // Prefer an exact provider-neutral model. Reverse substring matching let
+    // longer entries such as `azureusgpt-5.6-sol` override `gpt-5.6-sol`.
+    const exact = this.rates.find(([key]) => key === n);
+    if (exact) return exact[1];
+    // Otherwise use the longest known model contained in the reported name.
     let best: Rate | null = null;
     let bestLen = 0;
     for (const [key, rate] of this.rates) {
       if (key === "default") continue;
-      if (n.includes(key) || key.includes(n)) {
+      if (n.includes(key)) {
         if (key.length > bestLen) {
           best = rate;
           bestLen = key.length;
@@ -160,7 +164,7 @@ export class Pricer {
   }
 
   price(model: string, t: { uncached: number; cached: number; cacheCreation: number; output: number }, reported: number | null): { costUsd: number; source: "reported" | "priced" | "unpriced" } {
-    if (reported != null && Number.isFinite(reported) && reported >= 0 && reported > 0) {
+    if (reported != null && Number.isFinite(reported) && reported >= 0) {
       return { costUsd: reported, source: "reported" };
     }
     const r = this.findRate(model);

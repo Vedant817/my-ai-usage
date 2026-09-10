@@ -36,6 +36,7 @@ export function parseCodex(
   // Recover session/model context when resuming mid-file (context lines live at file head).
   const recoverContext = (file: string): { sessionId: string; model: string } => {
     let sessionId = "", model = "";
+    let sawSessionMeta = false;
     try {
       const fd = fs.openSync(file, "r");
       try {
@@ -45,7 +46,10 @@ export function parseCodex(
         for (const line of buf.toString("utf8").split("\n").slice(0, 400)) {
           try {
             const o = JSON.parse(line.trim());
-            if (o?.type === "session_meta" && o?.payload?.id) sessionId = String(o.payload.id);
+            if (!sawSessionMeta && o?.type === "session_meta") {
+              sawSessionMeta = true;
+              sessionId = String(o?.payload?.id ?? o?.payload?.session_id ?? sessionId);
+            }
             const m = o?.type === "turn_context" ? (o?.payload?.model ?? o?.payload?.model_name) : null;
             if (m) model = String(m);
           } catch { /* ignore */ }
@@ -60,7 +64,9 @@ export function parseCodex(
   for (const file of files) {
     let st: fs.Stats;
     try { st = fs.statSync(file); } catch { skipped++; continue; }
-    const key = `codex:${file}`;
+    // Versioned key forces one clean re-baseline after fork-copy suppression
+    // was added; otherwise old inflated per-file records would remain cached.
+    const key = `codex-v2:${file}`;
     liveKeys.add(key);
     const { start, fresh } = incrementalRange(state, key, st.size, st.mtimeMs);
     if (fresh) {
@@ -85,6 +91,9 @@ export function parseCodex(
       let model = "";
       if (start > 0) ({ sessionId, model } = recoverContext(file));
       let prevSig = "";
+      let sawSessionMeta = start > 0;
+      let suppressingForkCopies = false;
+      let forkCopyAnchorMs = 0;
       for (const line of text.split("\n")) {
         const t = line.trim();
         if (!t) continue;
@@ -92,7 +101,18 @@ export function parseCodex(
         try { obj = JSON.parse(t); } catch { continue; }
         const type = String(obj?.type ?? "");
         if (type === "session_meta") {
-          sessionId = String(obj?.payload?.id ?? sessionId);
+          // Forked rollouts repeat ancestor metadata and token events at their
+          // head. Only the first meta belongs to this file's own session.
+          if (sawSessionMeta) continue;
+          sawSessionMeta = true;
+          sessionId = String(obj?.payload?.id ?? obj?.payload?.session_id ?? sessionId);
+          const source = obj?.payload?.source;
+          const isFork = typeof obj?.payload?.forked_from_id === "string"
+            || typeof source?.subagent?.thread_spawn?.parent_thread_id === "string";
+          if (isFork) {
+            suppressingForkCopies = true;
+            forkCopyAnchorMs = toMs(obj.timestamp, 0);
+          }
           continue;
         }
         if (type === "turn_context") {
@@ -115,6 +135,15 @@ export function parseCodex(
         if (sig === prevSig) continue; // dedupe consecutive identical
         prevSig = sig;
         const ts = toMs(obj.timestamp, st.mtimeMs);
+        if (suppressingForkCopies) {
+          // Parent history is copied synchronously (observed gaps below 1s).
+          // The first genuine child turn arrives after a real model round trip.
+          if (ts - forkCopyAnchorMs < 1000) {
+            forkCopyAnchorMs = ts;
+            continue;
+          }
+          suppressingForkCopies = false;
+        }
         if (ts < windowStartMs - 36 * 3600 * 1000) continue;
         const day = dayOfLocal(ts);
         if (!dayFilter(day)) continue;
@@ -139,7 +168,11 @@ export function parseCodex(
       skipped++;
     }
   }
-  pruneFileRecords(state, liveKeys, "codex:");
+  pruneFileRecords(state, new Set(), "codex:");
+  pruneFileRecords(state, liveKeys, "codex-v2:");
+  for (const key of Object.keys(state.fileCache)) {
+    if (key.startsWith("codex:")) delete state.fileCache[key];
+  }
 
   return {
     records,

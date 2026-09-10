@@ -1,9 +1,9 @@
 // Shared types. Privacy: only totals leave the PC. Never include prompts,
 // completions, file contents, or absolute paths in payloads or logs.
 
-export type Provider = "codex" | "claude" | "grok" | "opencode" | "antigravity" | "zed";
+export type Provider = "codex" | "claude" | "grok" | "opencode" | "antigravity";
 
-export const PROVIDERS: Provider[] = ["codex", "claude", "grok", "opencode", "antigravity", "zed"];
+export const PROVIDERS: Provider[] = ["codex", "claude", "grok", "opencode", "antigravity"];
 
 export interface UsageRecord {
   day: string; // YYYY-MM-DD (collector-local date)

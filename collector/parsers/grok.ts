@@ -9,10 +9,8 @@ function num(v: unknown): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-// Wire semantics (xai-org/grok-build, crates/.../extensions/notification.rs):
-// each turn_completed carries THAT turn's own usage (per-prompt ledger), with
-// cost in 1e10 ticks = $1. Costs on usageIsIncomplete turns are scrubbed by the
-// CLI as untrustworthy, so we fall back to table pricing for those.
+// Wire semantics (xai-org/grok-build and t3code): each turn_completed carries
+// that turn's own usage, with cost in 1e10 ticks = $1.
 export function parseGrok(
   state: DashState,
   windowStartMs: number,
@@ -31,7 +29,9 @@ export function parseGrok(
   for (const file of files) {
     let st: fs.Stats;
     try { st = fs.statSync(file); } catch { skipped++; continue; }
-    const key = `grok:${file}`;
+    // Versioned key re-baselines records after adopting T3 Code's exact cost
+    // allocation and deduplication behavior.
+    const key = `grok-v2:${file}`;
     liveKeys.add(key);
     const { start, fresh } = incrementalRange(state, key, st.size, st.mtimeMs);
     if (fresh) {
@@ -42,19 +42,10 @@ export function parseGrok(
       continue;
     }
     const freshRecs: UsageRecord[] = [];
-    const freshByKey = new Map<string, UsageRecord>();
     const pushFresh = (r: UsageRecord) => {
-      const prev = freshByKey.get(r.dedupeKey);
-      if (!prev) {
-        freshByKey.set(r.dedupeKey, r);
-        freshRecs.push(r);
-        return;
-      }
-      // Same key twice in one read (e.g. retried prompt sharing prompt_id and
-      // millisecond): accumulate — both turns were billed.
-      prev.uncached += r.uncached; prev.cached += r.cached;
-      prev.cacheCreation += r.cacheCreation; prev.output += r.output;
-      prev.reasoning = Math.min(prev.reasoning + r.reasoning, prev.output);
+      if (seen.has(r.dedupeKey)) return;
+      seen.add(r.dedupeKey);
+      freshRecs.push(r);
     };
     try {
       const fd = fs.openSync(file, "r");
@@ -78,26 +69,29 @@ export function parseGrok(
           ?? (typeof obj?.timestamp === "number" ? obj.timestamp * 1000 : NaN));
         const tsMs = Number.isFinite(ts) ? ts : st.mtimeMs;
         if (tsMs < slack) continue;
-        const modelUsage = update.usage?.modelUsage ?? update.modelUsage ?? update.usage;
-        if (!modelUsage || typeof modelUsage !== "object") continue;
-        for (const [model, u] of Object.entries<any>(modelUsage)) {
-          const promptId = String(update.prompt_id ?? update.promptId ?? update.turn_id ?? update.turnId ?? "");
-          const key = `${sessionId}:${promptId}:${model}:${tsMs}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
+        // Per-model breakdowns live under usage.modelUsage; the top-level
+        // usage object itself is totals, never a model (t3code parity).
+        const muSource = update.usage?.modelUsage ?? update.modelUsage;
+        const modelEntries: Array<[string, any]> =
+          muSource && typeof muSource === "object"
+            ? Object.entries(muSource).filter(([m, u]) => m.length > 0 && u !== null && typeof u === "object")
+            : [];
+        const promptId = String(update.prompt_id ?? update.promptId ?? update.turn_id ?? update.turnId ?? "");
+        const day = dayOfLocal(tsMs);
+        if (!dayFilter(day)) continue;
+        const readTotals = (u: any) => {
           const input = num(u.inputTokens ?? u.input_tokens);
           const output = num(u.outputTokens ?? u.output_tokens);
           const cached = num(u.cachedReadTokens ?? u.cached_input_tokens);
           const created = num(u.cacheCreationTokens ?? u.cache_creation_input_tokens);
           const reasoning = num(u.reasoningTokens ?? u.reasoning_output_tokens);
-          const ticks = u.costUsdTicks ?? u.cost_usd_ticks ?? u.costTicks;
-          // Incomplete bills under-count (open subagents) so the CLI scrubs
-          // their cost; price those tokens via table instead.
-          const incomplete = update.usageIsIncomplete === true || (u as any).usageIsIncomplete === true;
-          const reported = !incomplete && ticks != null && Number.isFinite(Number(ticks)) ? Number(ticks) / 1e10 : null;
-          if (!input && !output && !cached && !created && reported == null) continue;
-          const day = dayOfLocal(tsMs);
-          if (!dayFilter(day)) continue;
+          return { input, output, cached, created, reasoning };
+        };
+        const readCost = (ticks: unknown): number | null =>
+          typeof ticks === "number" && Number.isFinite(ticks) ? ticks / 1e10 : null;
+        const pushTotals = (model: string, u: any, reported: number | null, key: string) => {
+          const { input, output, cached, created, reasoning } = readTotals(u);
+          if (!input && !output && !cached && !created) return;
           sessions.add(sessionId);
           pushFresh({
             day, provider: "grok", model,
@@ -107,6 +101,36 @@ export function parseGrok(
             reportedCost: reported,
             sessionId, dedupeKey: key,
           });
+        };
+        if (modelEntries.length === 0) {
+          // No per-model split: single record from turn totals (model "grok").
+          const u = update.usage ?? {};
+          const key = promptId ? `${sessionId}:${promptId}:grok` : `${sessionId}:grok:${tsMs}`;
+          pushTotals("grok", u, readCost(u.costUsdTicks ?? u.cost_usd_ticks ?? u.costTicks), key);
+          continue;
+        }
+        const top = update.usage ?? {};
+        const topCost = readCost(top.costUsdTicks ?? top.cost_usd_ticks ?? top.costTicks);
+        let usedCost = 0;
+        let untickedTokens = 0;
+        for (const [, u] of modelEntries) {
+          const t = readTotals(u);
+          const tokens = Math.max(0, t.input - t.cached - t.created) + t.cached + t.created + t.output;
+          if (tokens === 0) continue;
+          const cost = readCost(u.costUsdTicks ?? u.cost_usd_ticks ?? u.costTicks);
+          if (cost === null) untickedTokens += tokens;
+          else usedCost += cost;
+        }
+        const remainingCost = topCost === null ? null : Math.max(0, topCost - usedCost);
+        for (const [model, u] of modelEntries) {
+          const t = readTotals(u);
+          const tokens = Math.max(0, t.input - t.cached - t.created) + t.cached + t.created + t.output;
+          let cost = readCost(u.costUsdTicks ?? u.cost_usd_ticks ?? u.costTicks);
+          if (cost === null && remainingCost !== null && untickedTokens > 0) {
+            cost = remainingCost * (tokens / untickedTokens);
+          }
+          const key = promptId ? `${sessionId}:${promptId}:${model}` : `${sessionId}:${model}:${tsMs}`;
+          pushTotals(model, u, cost, key);
         }
       }
       markRead(state, key, st.size, st.mtimeMs, st.size);
@@ -118,7 +142,11 @@ export function parseGrok(
       skipped++;
     }
   }
-  pruneFileRecords(state, liveKeys, "grok:");
+  pruneFileRecords(state, new Set(), "grok:");
+  pruneFileRecords(state, liveKeys, "grok-v2:");
+  for (const key of Object.keys(state.fileCache)) {
+    if (key.startsWith("grok:")) delete state.fileCache[key];
+  }
 
   return {
     records,
