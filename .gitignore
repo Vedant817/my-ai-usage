@@ -8,4 +8,5 @@ data/
 .env
 !.env.example
 .usage-dash/
+.cursor/
 __pycache__/

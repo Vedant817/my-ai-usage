@@ -1,6 +1,8 @@
 [Unit]
-Description=Usage dashboard collector push
+Description=Usage dashboard collector push (no repo needed; uses published npm package)
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/env bun /opt/my-ai-usage/collector/index.ts --push
+# Requires once per machine: Bun (or Node 22+) plus API_URL, INGEST_TOKEN,
+# DEVICE_ID, DEVICE_LABEL in the service environment (e.g. EnvironmentFile=).
+ExecStart=/usr/bin/env bunx ai-usage-collector@latest --push --days 30

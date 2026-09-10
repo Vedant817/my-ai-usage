@@ -70,11 +70,10 @@ bun run index.ts -- --push --data-dir D:\usage-state   # state dir override
 - Never reads `~/.claude/.credentials.json` / `~/.codex/auth.json`; provider API
   keys are not used anywhere.
 
-Schedule:
+Schedule (all via the published package, no clone):
 
-- **Windows** (Task Scheduler, every 15 min + on boot):
-  `schtasks /create /tn "UsageDash" /tr "bun 'C:\path\to\collector\index.ts --push'" /sc minute /mo 15 /f`
-  (see `collector/schedule-windows.ps1`).
+- **Windows** (Task Scheduler, every 15 min + on boot): see
+  `collector/schedule-windows.ps1` for the `schtasks` line.
 - **Linux**: `collector/usage-dash.{service,timer}` (systemd, 15 min + boot).
 
 ### Sync without cloning the repo

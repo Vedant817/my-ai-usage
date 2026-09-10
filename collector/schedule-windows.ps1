@@ -1,7 +1,6 @@
-# Run collector every 15 minutes (Windows). Run once as admin to register:
-#   schtasks /create /tn "UsageDash" /tr "bun 'C:\path\to\my-ai-usage\collector\index.ts --push'" /sc minute /mo 15 /f
-# Or with Task Scheduler GUI pointing at schedule-windows.ps1.
+# Sync this machine's usage without cloning the repo (Windows).
+# Requires once per machine: Bun (or Node 22+) plus API_URL, INGEST_TOKEN,
+# DEVICE_ID, DEVICE_LABEL env vars. Register to run every 15 minutes:
+#   schtasks /create /tn "UsageDash" /tr "powershell -ExecutionPolicy Bypass -File '%USERPROFILE%\.usage-dash\sync-windows.ps1'" /sc minute /mo 15 /f
 $ErrorActionPreference = "Stop"
-$root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$collector = Join-Path (Split-Path -Parent $root) "collector\index.ts"
-& bun $collector --push
+& bunx ai-usage-collector@latest --push --days 30
