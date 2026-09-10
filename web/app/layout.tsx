@@ -22,7 +22,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="icon" href="/icons/icon-192.png" sizes="192x192" />
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
       </head>
-      <body>
+      {/* Browser extensions (e.g. Grammarly) inject attributes into <body>
+          before React hydrates; suppress the resulting hydration warning. */}
+      <body suppressHydrationWarning>
         {children}
         <script
           dangerouslySetInnerHTML={{
