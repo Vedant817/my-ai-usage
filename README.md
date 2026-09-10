@@ -203,6 +203,12 @@ Cloud OpenCode rows are authoritative for each exported day, so matching local
 rows are not double-counted. You can still set `SKIP_PROVIDERS=opencode` in the
 collector `.env` to avoid unnecessary local parsing.
 
+Turns run in OpenCode but backed by another account (e.g. a Codex/ChatGPT
+subscription via the `openai` provider) are recorded once, under OpenCode —
+verified zero overlapping turns with `~/.codex/sessions` — and labeled with
+their backing provider (`openai/gpt-5.6-sol`). Labels are display-only and
+cost-neutral (priced by bare model id).
+
 ## 4. Android (no custom app)
 
 1. **PWA**: Chrome → open the site → ⋮ → **Add to Home screen**. Done — one tap,

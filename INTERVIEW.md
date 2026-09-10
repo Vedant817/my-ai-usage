@@ -91,7 +91,10 @@ comparison (August Codex 448,638,364 tokens both ways).
 Upsert by `(deviceId, day)`; summary sums across devices. Cloud OpenCode rows
 (`deviceId cloud:opencode`) are authoritative per day so local rows aren't
 double-counted. Coverage metadata in the API tells the UI `Account-wide` vs
-`This device`, with an honest note where no account API exists.
+`This device`, with an honest note where no account API exists. Codex-
+subscription turns run inside OpenCode are verified disjoint from CLI rollouts
+(0 overlapping turns across ~30k records) and labeled `openai/<model>` —
+single-counted under OpenCode, cost-neutral pricing.
 
 ### 4.5 Dashboard
 
